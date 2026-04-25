@@ -1,4 +1,4 @@
 /**
- * OpenAI integration layer (disabled in current MVP stage).
+ * OpenAI integration for auxiliary text blocks in preview mode.
  */
 package com.bankrotapp.openai;
