@@ -555,4 +555,66 @@ public class DocumentGenerationService {
         String middleInitial = DASH.equals(fioParts[2]) ? "" : " " + fioParts[2].charAt(0) + ".";
         return fioParts[0] + " " + firstInitial + middleInitial;
     }
+
+    private void scrubLegacyTemplateArtifacts(XWPFDocument document, Debtor debtor) {
+        String[] fioParts = splitFio(debtor.fullName());
+        String fullName = safe(debtor.fullName());
+        String lastName = fioParts[0];
+        replaceLegacyMarkersInParagraphs(document.getParagraphs(), fullName, lastName);
+        replaceLegacyMarkersInTables(document.getTables(), fullName, lastName);
+
+        for (XWPFHeader header : document.getHeaderList()) {
+            replaceLegacyMarkersInParagraphs(header.getParagraphs(), fullName, lastName);
+            replaceLegacyMarkersInTables(header.getTables(), fullName, lastName);
+        }
+        for (XWPFFooter footer : document.getFooterList()) {
+            replaceLegacyMarkersInParagraphs(footer.getParagraphs(), fullName, lastName);
+            replaceLegacyMarkersInTables(footer.getTables(), fullName, lastName);
+        }
+    }
+
+    private void replaceLegacyMarkersInTables(List<XWPFTable> tables, String fullName, String lastName) {
+        for (XWPFTable table : tables) {
+            for (XWPFTableRow row : table.getRows()) {
+                for (XWPFTableCell cell : row.getTableCells()) {
+                    replaceLegacyMarkersInParagraphs(cell.getParagraphs(), fullName, lastName);
+                    replaceLegacyMarkersInTables(cell.getTables(), fullName, lastName);
+                }
+            }
+        }
+    }
+
+    private void replaceLegacyMarkersInParagraphs(List<XWPFParagraph> paragraphs, String fullName, String lastName) {
+        for (XWPFParagraph paragraph : paragraphs) {
+            String source = paragraph.getText();
+            if (source == null || source.isBlank()) {
+                continue;
+            }
+
+            String updated = source
+                    .replace("Захаров Владимир Игоревич", fullName)
+                    .replace("Захаров В. И.", shortName(fullName))
+                    .replace("Захаров", lastName);
+
+            if (source.equals(updated)) {
+                continue;
+            }
+
+            int runCount = paragraph.getRuns().size();
+            for (int i = runCount - 1; i >= 0; i--) {
+                paragraph.removeRun(i);
+            }
+            paragraph.createRun().setText(updated);
+        }
+    }
+
+    private String shortName(String fullName) {
+        String[] fioParts = splitFio(fullName);
+        if (DASH.equals(fioParts[0])) {
+            return DASH;
+        }
+        String firstInitial = DASH.equals(fioParts[1]) ? "" : fioParts[1].charAt(0) + ".";
+        String middleInitial = DASH.equals(fioParts[2]) ? "" : " " + fioParts[2].charAt(0) + ".";
+        return fioParts[0] + " " + firstInitial + middleInitial;
+    }
 }
