@@ -9,6 +9,7 @@ import com.bankrotapp.model.Creditor;
 import com.bankrotapp.model.Debtor;
 import com.bankrotapp.model.RealEstateItem;
 import com.bankrotapp.model.Vehicle;
+import org.apache.poi.xwpf.extractor.XWPFWordExtractor;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.apache.poi.xwpf.usermodel.XWPFParagraph;
 import org.apache.poi.xwpf.usermodel.XWPFRun;
@@ -41,6 +42,14 @@ public class DocumentGenerationService {
     private static final String TEMPLATE_STATEMENT = "templates/zayavlenie.docx";
     private static final String TEMPLATE_APPENDIX_1 = "templates/prilozhenie_1.docx";
     private static final String TEMPLATE_APPENDIX_2 = "templates/prilozhenie_2.docx";
+    private static final List<String> TEMPLATE_ARTIFACTS_FOR_IVANOV = List.of(
+            "Захаров",
+            "ВЭББАНКИР",
+            "ТУРБОЗАЙМ",
+            "МИГКРЕДИТ",
+            "MITSUBISHI RVR",
+            "1 248 887,93"
+    );
 
     private final DebtCalculationService debtCalculationService;
     private final DocxTemplateRenderer docxTemplateRenderer;
@@ -61,6 +70,12 @@ public class DocumentGenerationService {
         byte[] statementDocx = generateStatementDocx(data);
         byte[] appendixOneDocx = generateAppendixOneDocx(data, creditors);
         byte[] appendixTwoDocx = generateAppendixTwoDocx(data, realEstateItems, vehicles, bankAccounts);
+
+        if ("Иванов Сергей Николаевич".equals(debtor.fullName())) {
+            ensureNoTemplateArtifacts("Заявление", statementDocx);
+            ensureNoTemplateArtifacts("Приложение №1", appendixOneDocx);
+            ensureNoTemplateArtifacts("Приложение №2", appendixTwoDocx);
+        }
 
         try (ByteArrayOutputStream out = new ByteArrayOutputStream();
              ZipOutputStream zipOutputStream = new ZipOutputStream(out, StandardCharsets.UTF_8)) {
@@ -116,13 +131,28 @@ public class DocumentGenerationService {
     private Map<String, String> placeholders(BankruptcyApplicationData data) {
         Debtor debtor = data.debtor();
         Map<String, String> map = new LinkedHashMap<>();
+        String[] fioParts = splitFio(debtor.fullName());
         map.put("debtor.fullName", safe(debtor.fullName()));
+        map.put("debtor.lastName", fioParts[0]);
+        map.put("debtor.firstName", fioParts[1]);
+        map.put("debtor.middleName", fioParts[2]);
+        map.put("debtor.shortName", fioParts[0] + " "
+                + (DASH.equals(fioParts[1]) ? "" : fioParts[1].charAt(0) + ". ")
+                + (DASH.equals(fioParts[2]) ? "" : fioParts[2].charAt(0) + "."));
         map.put("debtor.birthDate", debtor.birthDate() == null ? DASH : debtor.birthDate().format(DATE_FORMATTER));
         map.put("debtor.birthPlace", safe(debtor.birthPlace()));
         map.put("debtor.inn", safe(debtor.inn()));
         map.put("debtor.snils", safe(debtor.snils()));
         map.put("debtor.passportNumber", safe(debtor.passportNumber()));
+        map.put("debtor.registrationAddress.region", debtor.registrationAddress() == null ? DASH : safe(debtor.registrationAddress().region()));
+        map.put("debtor.registrationAddress.city", debtor.registrationAddress() == null ? DASH : safe(debtor.registrationAddress().city()));
+        map.put("debtor.registrationAddress.street", debtor.registrationAddress() == null ? DASH : safe(debtor.registrationAddress().street()));
+        map.put("debtor.registrationAddress.postalCode", debtor.registrationAddress() == null ? DASH : safe(debtor.registrationAddress().postalCode()));
         map.put("debtor.registrationAddress.fullAddress", formatAddress(debtor.registrationAddress()));
+        map.put("vehicle.primaryLabel", DASH);
+        map.put("creditor.sample1", DASH);
+        map.put("creditor.sample2", DASH);
+        map.put("creditor.sample3", DASH);
         map.put("totalDebtFormatted", debtCalculationService.formatAmountRu(debtCalculationService.calculateTotalDebt(data.creditors())));
         return map;
     }
@@ -310,7 +340,10 @@ public class DocumentGenerationService {
                 .orElse(null);
 
         XWPFTableRow row = table.getRow(rowIndex);
+        String baseLabel = safe(row.getCell(1).getText());
+        String prefix = baseLabel.contains(")") ? baseLabel.substring(0, baseLabel.indexOf(')') + 1) : "1)";
         if (vehicle == null) {
+            setCellText(row.getCell(1), prefix);
             for (int col = 2; col <= 6; col++) {
                 setCellText(row.getCell(col), DASH);
             }
@@ -323,7 +356,7 @@ public class DocumentGenerationService {
                 .reduce((left, right) -> left + " " + right)
                 .orElse(DASH);
 
-        setCellText(row.getCell(1), row.getCell(1).getText().replace("1)", "1) " + vehicleLabel));
+        setCellText(row.getCell(1), prefix + " " + vehicleLabel);
         setCellText(row.getCell(2), safe(vehicle.registrationNumber()));
         setCellText(row.getCell(3), "Собственность");
         setCellText(row.getCell(4), formatAddress(storageAddress));
@@ -434,5 +467,17 @@ public class DocumentGenerationService {
             String debtAmount,
             String penalties
     ) {
+    }
+
+    private void ensureNoTemplateArtifacts(String documentName, byte[] docxBytes) throws IOException {
+        try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(docxBytes));
+             XWPFWordExtractor extractor = new XWPFWordExtractor(document)) {
+            String text = extractor.getText();
+            for (String marker : TEMPLATE_ARTIFACTS_FOR_IVANOV) {
+                if (text.contains(marker)) {
+                    throw new IllegalStateException(documentName + ": в результирующем DOCX найден запрещенный шаблонный маркер \"" + marker + "\".");
+                }
+            }
+        }
     }
 }
