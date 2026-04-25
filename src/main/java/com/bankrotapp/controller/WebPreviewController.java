@@ -98,6 +98,9 @@ public class WebPreviewController {
                         <label for="vehicleLines">Транспорт (тип|марка|модель|госномер|год)</label>
                         <textarea id="vehicleLines" name="vehicleLines" placeholder="Легковой автомобиль|Hyundai|Solaris|А111АА77|2017"></textarea>
 
+                        <label for="employmentStatus">Работа (EMPLOYED / UNEMPLOYED)</label>
+                        <input id="employmentStatus" name="employmentStatus" placeholder="EMPLOYED">
+
                         <h2>Вспомогательные текстовые блоки (OpenAI только для этих полей)</h2>
                         <label for="hardshipReasonInput">Причина тяжелого финансового положения</label>
                         <textarea id="hardshipReasonInput" name="hardshipReasonInput" placeholder="Например: после сокращения дохода и роста обязательных платежей стало невозможно исполнять обязательства в полном объеме."></textarea>
@@ -130,6 +133,7 @@ public class WebPreviewController {
                               @RequestParam(required = false, defaultValue = "") String childrenLines,
                               @RequestParam(required = false, defaultValue = "") String realEstateLines,
                               @RequestParam(required = false, defaultValue = "") String vehicleLines,
+                              @RequestParam(required = false, defaultValue = "EMPLOYED") String employmentStatus,
                               @RequestParam(required = false, defaultValue = "") String hardshipReasonInput,
                               @RequestParam(required = false, defaultValue = "") String employmentIncomeInput,
                               @RequestParam(required = false, defaultValue = "") String loanFundsUsageInput) {
@@ -139,6 +143,7 @@ public class WebPreviewController {
         String familyBlock = buildFamilyBlock(maritalStatus, spouseName, marriageDate, marriageCertificate,
                 divorceDate, divorceCertificate, spouseDeathDate, deathCertificate, childrenLines);
         String propertyBlock = buildPropertyBlock(realEstateLines, vehicleLines);
+        String employmentBlock = buildEmploymentBlock(employmentStatus);
         OpenAiTextBlocks auxiliaryTextBlocks = openAiTextBlockService.generateAuxiliaryBlocks(
                 hardshipReasonInput,
                 employmentIncomeInput,
@@ -201,6 +206,10 @@ public class WebPreviewController {
 
         html.append("<section><h2>Блок имущества</h2><pre>")
                 .append(escape(propertyBlock.isBlank() ? "Нет данных" : propertyBlock))
+                .append("</pre></section>");
+
+        html.append("<section><h2>Блок занятости</h2><pre>")
+                .append(escape(employmentBlock))
                 .append("</pre></section>");
 
         html.append("<section><h2>Вспомогательные блоки перед генерацией DOCX</h2>")
@@ -433,6 +442,15 @@ public class WebPreviewController {
         }
 
         return block.toString();
+    }
+
+    private String buildEmploymentBlock(String employmentStatus) {
+        String normalizedStatus = employmentStatus == null ? "" : employmentStatus.trim().toUpperCase();
+        return switch (normalizedStatus) {
+            case "UNEMPLOYED" -> "Официального места работы не имеет.";
+            case "EMPLOYED" -> "Официально трудоустроен.";
+            default -> "Сведения о занятости не предоставлены.";
+        };
     }
 
     private List<String[]> parseStructuredLines(String lines, int columns) {
