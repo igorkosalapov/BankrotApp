@@ -11,6 +11,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -18,6 +21,8 @@ import java.util.Map;
 
 @Controller
 public class WebPreviewController {
+
+    private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("dd.MM.yyyy");
 
     private final DebtCalculationService debtCalculationService;
 
@@ -55,11 +60,38 @@ public class WebPreviewController {
                         <textarea id="creditorLines" name="creditorLines" placeholder="Банк А|Кредитный договор №123|150000\nМФО Б|Договор займа №77|25000" required></textarea>
                         <div class="hint">Формат: <code>Кредитор|Договор|Сумма</code>. Одна строка — один договор.</div>
 
-                        <label for="familyBlock">Семейный блок</label>
-                        <textarea id="familyBlock" name="familyBlock" placeholder="В браке: да\nСупруг(а): Петрова А.А.\nДети: 2"></textarea>
+                        <label for="maritalStatus">Семейное положение (SINGLE / MARRIED / DIVORCED / WIDOWED)</label>
+                        <input id="maritalStatus" name="maritalStatus" placeholder="SINGLE">
 
-                        <label for="propertyBlock">Блок имущества</label>
-                        <textarea id="propertyBlock" name="propertyBlock" placeholder="Авто: Hyundai Solaris\nНедвижимость: квартира 45 м²\nИное ценное имущество: нет"></textarea>
+                        <label for="spouseName">ФИО супруга(и)</label>
+                        <input id="spouseName" name="spouseName" placeholder="Петрова Анна Александровна">
+
+                        <label for="marriageDate">Дата брака (дд.мм.гггг)</label>
+                        <input id="marriageDate" name="marriageDate" placeholder="01.06.2015">
+
+                        <label for="marriageCertificate">Свидетельство о браке</label>
+                        <input id="marriageCertificate" name="marriageCertificate" placeholder="IV-МЮ №123456">
+
+                        <label for="divorceDate">Дата расторжения брака (дд.мм.гггг)</label>
+                        <input id="divorceDate" name="divorceDate" placeholder="14.02.2020">
+
+                        <label for="divorceCertificate">Свидетельство о расторжении брака</label>
+                        <input id="divorceCertificate" name="divorceCertificate" placeholder="II-БР №654321">
+
+                        <label for="spouseDeathDate">Дата смерти супруга(и) (дд.мм.гггг)</label>
+                        <input id="spouseDeathDate" name="spouseDeathDate" placeholder="21.03.2021">
+
+                        <label for="deathCertificate">Свидетельство о смерти</label>
+                        <input id="deathCertificate" name="deathCertificate" placeholder="III-СМ №777888">
+
+                        <label for="childrenLines">Дети (ФИО|дата рождения|свидетельство)</label>
+                        <textarea id="childrenLines" name="childrenLines" placeholder="Иванов Петр Иванович|11.02.2014|I-АБ №123456"></textarea>
+
+                        <label for="realEstateLines">Недвижимость (тип|описание)</label>
+                        <textarea id="realEstateLines" name="realEstateLines" placeholder="Квартира|г. Москва, ул. Тверская, д. 10, кв. 15"></textarea>
+
+                        <label for="vehicleLines">Транспорт (тип|марка|модель|госномер|год)</label>
+                        <textarea id="vehicleLines" name="vehicleLines" placeholder="Легковой автомобиль|Hyundai|Solaris|А111АА77|2017"></textarea>
 
                         <button type="submit">Показать предпросмотр</button>
                     </form>
@@ -72,11 +104,23 @@ public class WebPreviewController {
     @ResponseBody
     public String previewPage(@RequestParam String fullName,
                               @RequestParam String creditorLines,
-                              @RequestParam(required = false, defaultValue = "") String familyBlock,
-                              @RequestParam(required = false, defaultValue = "") String propertyBlock) {
+                              @RequestParam(required = false, defaultValue = "SINGLE") String maritalStatus,
+                              @RequestParam(required = false, defaultValue = "") String spouseName,
+                              @RequestParam(required = false, defaultValue = "") String marriageDate,
+                              @RequestParam(required = false, defaultValue = "") String marriageCertificate,
+                              @RequestParam(required = false, defaultValue = "") String divorceDate,
+                              @RequestParam(required = false, defaultValue = "") String divorceCertificate,
+                              @RequestParam(required = false, defaultValue = "") String spouseDeathDate,
+                              @RequestParam(required = false, defaultValue = "") String deathCertificate,
+                              @RequestParam(required = false, defaultValue = "") String childrenLines,
+                              @RequestParam(required = false, defaultValue = "") String realEstateLines,
+                              @RequestParam(required = false, defaultValue = "") String vehicleLines) {
 
         List<Creditor> creditors = parseCreditors(creditorLines);
         BigDecimal totalDebt = debtCalculationService.calculateTotalDebt(creditors);
+        String familyBlock = buildFamilyBlock(maritalStatus, spouseName, marriageDate, marriageCertificate,
+                divorceDate, divorceCertificate, spouseDeathDate, deathCertificate, childrenLines);
+        String propertyBlock = buildPropertyBlock(realEstateLines, vehicleLines);
 
         StringBuilder html = new StringBuilder();
         html.append("""
@@ -234,5 +278,161 @@ public class WebPreviewController {
         }
 
         html.append("</article>");
+    }
+
+    private String buildFamilyBlock(String maritalStatus,
+                                    String spouseName,
+                                    String marriageDate,
+                                    String marriageCertificate,
+                                    String divorceDate,
+                                    String divorceCertificate,
+                                    String spouseDeathDate,
+                                    String deathCertificate,
+                                    String childrenLines) {
+        StringBuilder block = new StringBuilder();
+        String normalizedStatus = maritalStatus == null ? "" : maritalStatus.trim().toUpperCase();
+
+        switch (normalizedStatus) {
+            case "MARRIED" -> block.append("Состоит в зарегистрированном браке");
+            case "DIVORCED" -> block.append("Брак расторгнут");
+            case "WIDOWED" -> block.append("Супруг(а) умер(ла)");
+            case "SINGLE" -> block.append("В браке не состоит.");
+            default -> block.append("В браке не состоит.");
+        }
+
+        if ("MARRIED".equals(normalizedStatus)) {
+            if (!spouseName.isBlank()) {
+                block.append(" с ").append(spouseName.trim());
+            }
+            if (!marriageDate.isBlank()) {
+                block.append(", дата регистрации брака: ").append(formatDate(marriageDate));
+            }
+            if (!marriageCertificate.isBlank()) {
+                block.append(", свидетельство о заключении брака: ").append(marriageCertificate.trim());
+            }
+            block.append(".");
+        }
+
+        if ("DIVORCED".equals(normalizedStatus)) {
+            if (!divorceDate.isBlank()) {
+                block.append(", дата расторжения брака: ").append(formatDate(divorceDate));
+            }
+            if (!divorceCertificate.isBlank()) {
+                block.append(", свидетельство о расторжении брака: ").append(divorceCertificate.trim());
+            }
+            block.append(".");
+        }
+
+        if ("WIDOWED".equals(normalizedStatus)) {
+            if (!spouseName.isBlank()) {
+                block.append(" ").append(spouseName.trim());
+            }
+            if (!spouseDeathDate.isBlank()) {
+                block.append(", дата смерти: ").append(formatDate(spouseDeathDate));
+            }
+            if (!deathCertificate.isBlank()) {
+                block.append(", свидетельство о смерти: ").append(deathCertificate.trim());
+            }
+            block.append(".");
+        }
+
+        List<String[]> children = parseStructuredLines(childrenLines, 3);
+        block.append(System.lineSeparator());
+        if (children.isEmpty()) {
+            block.append("Несовершеннолетних детей на иждивении не имеет.");
+        } else {
+            block.append("Несовершеннолетние дети:");
+            for (String[] child : children) {
+                block.append(System.lineSeparator())
+                        .append("- ")
+                        .append(child[0])
+                        .append(", дата рождения: ")
+                        .append(formatDate(child[1]))
+                        .append(", свидетельство о рождении: ")
+                        .append(child[2]);
+            }
+        }
+
+        return block.toString();
+    }
+
+    private String buildPropertyBlock(String realEstateLines, String vehicleLines) {
+        StringBuilder block = new StringBuilder();
+        List<String[]> realEstateItems = parseStructuredLines(realEstateLines, 2);
+        List<String[]> vehicles = parseStructuredLines(vehicleLines, 5);
+
+        if (realEstateItems.isEmpty()) {
+            block.append("Объекты недвижимости в собственности отсутствуют.");
+        } else {
+            block.append("В собственности имеется недвижимое имущество:");
+            for (String[] item : realEstateItems) {
+                block.append(System.lineSeparator())
+                        .append("- ")
+                        .append(item[0])
+                        .append(": ")
+                        .append(item[1]);
+            }
+        }
+
+        block.append(System.lineSeparator());
+        if (vehicles.isEmpty()) {
+            block.append("Транспортные средства отсутствуют.");
+        } else {
+            block.append("Транспортные средства:");
+            for (String[] vehicle : vehicles) {
+                block.append(System.lineSeparator())
+                        .append("- ")
+                        .append(vehicle[0])
+                        .append(" ")
+                        .append(vehicle[1])
+                        .append(" ")
+                        .append(vehicle[2])
+                        .append(", гос. номер: ")
+                        .append(vehicle[3])
+                        .append(", год выпуска: ")
+                        .append(vehicle[4]);
+            }
+        }
+
+        return block.toString();
+    }
+
+    private List<String[]> parseStructuredLines(String lines, int columns) {
+        if (lines == null || lines.isBlank()) {
+            return List.of();
+        }
+
+        List<String[]> parsed = new ArrayList<>();
+        for (String line : lines.split("\\R")) {
+            String trimmed = line.trim();
+            if (trimmed.isEmpty()) {
+                continue;
+            }
+
+            String[] parts = trimmed.split("\\|", -1);
+            if (parts.length < columns) {
+                continue;
+            }
+
+            String[] normalized = new String[columns];
+            for (int i = 0; i < columns; i++) {
+                normalized[i] = parts[i].trim();
+            }
+            parsed.add(normalized);
+        }
+
+        return parsed;
+    }
+
+    private String formatDate(String dateValue) {
+        if (dateValue == null || dateValue.isBlank()) {
+            return "";
+        }
+
+        try {
+            return LocalDate.parse(dateValue.trim(), DATE_FORMATTER).format(DATE_FORMATTER);
+        } catch (DateTimeParseException ignored) {
+            return dateValue.trim();
+        }
     }
 }
