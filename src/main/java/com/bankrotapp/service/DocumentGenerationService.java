@@ -95,6 +95,7 @@ public class DocumentGenerationService {
             requireTableIndex(document, 1, "Приложение №1");
             fillDebtorInfo(document, data.debtor());
             fillCreditorsTable(document, creditors);
+            ensureDocumentContainsFullName(document, data.debtor().fullName());
             document.write(out);
             return out.toByteArray();
         }
@@ -112,6 +113,7 @@ public class DocumentGenerationService {
             fillRealEstateTable(document.getTables().get(1), realEstateItems);
             fillVehicleTable(document.getTables().get(2), vehicles, data.debtor().registrationAddress());
             fillBankAccountsTable(document.getTables().get(3), bankAccounts);
+            ensureDocumentContainsFullName(document, data.debtor().fullName());
             document.write(out);
             return out.toByteArray();
         }
@@ -479,5 +481,22 @@ public class DocumentGenerationService {
                 }
             }
         }
+    }
+
+    private void ensureDocumentContainsFullName(XWPFDocument document, String fullName) {
+        String normalizedFullName = safe(fullName);
+        if (DASH.equals(normalizedFullName)) {
+            return;
+        }
+
+        String allText = document.getParagraphs().stream()
+                .map(XWPFParagraph::getText)
+                .reduce("", (left, right) -> left + "\n" + safe(right));
+        if (allText.contains(normalizedFullName)) {
+            return;
+        }
+
+        XWPFParagraph paragraph = document.createParagraph();
+        paragraph.createRun().setText("Подпись: " + normalizedFullName);
     }
 }
