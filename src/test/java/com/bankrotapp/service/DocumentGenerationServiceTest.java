@@ -9,6 +9,7 @@ import com.bankrotapp.model.Debtor;
 import com.bankrotapp.model.EmploymentInfo;
 import com.bankrotapp.model.FamilyInfo;
 import com.bankrotapp.model.PropertyInfo;
+import com.bankrotapp.model.Vehicle;
 import org.apache.poi.xwpf.extractor.XWPFWordExtractor;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.junit.jupiter.api.Test;
@@ -175,6 +176,113 @@ class DocumentGenerationServiceTest {
         }
     }
 
+    @Test
+    void testStatementDoesNotContainOldAmountsAndContracts() throws Exception {
+        String text = extract(service.generateStatementDocx(smirnovClient()));
+        assertNotContainsWithPreview(text, "1 248 887,93");
+        assertNotContainsWithPreview(text, "49 638,43");
+        assertNotContainsWithPreview(text, "30 842,40");
+        assertNotContainsWithPreview(text, "7 423,05");
+        assertNotContainsWithPreview(text, "1003074184/13");
+        assertNotContainsWithPreview(text, "АА 17226041");
+        assertNotContainsWithPreview(text, "1537512052");
+    }
+
+    @Test
+    void testStatementUsesCorrectShortName() throws Exception {
+        String text = extract(service.generateStatementDocx(smirnovClient()));
+        assertContainsWithPreview(text, "Смирнов А. П.");
+        assertNotContainsWithPreview(text, "Смирнов В. В.");
+        assertNotContainsWithPreview(text, "Смирнов В.И.");
+        assertNotContainsWithPreview(text, "Смирнова В.И.");
+    }
+
+    @Test
+    void testStatementUsesCorrectGenitiveFullName() throws Exception {
+        String text = extract(service.generateStatementDocx(smirnovClient()));
+        assertContainsWithPreview(text, "Смирнова Андрея Павловича");
+        assertNotContainsWithPreview(text, "Смирнова Владимира Игоревича");
+    }
+
+    @Test
+    void testStatementReplacesCreditorsDebtBlockCompletely() throws Exception {
+        String text = extract(service.generateStatementDocx(smirnovClient()));
+        assertContainsWithPreview(text, "ПАО ВТБ");
+        assertContainsWithPreview(text, "256 000,00");
+        assertContainsWithPreview(text, "VTB-2041");
+        assertContainsWithPreview(text, "180 000,00");
+        assertContainsWithPreview(text, "VTB-CC-87");
+        assertContainsWithPreview(text, "76 000,00");
+        assertContainsWithPreview(text, "ZM-5512");
+        assertContainsWithPreview(text, "34 000,00");
+        assertContainsWithPreview(text, "DS-908");
+        assertContainsWithPreview(text, "21 500,00");
+        assertNotContainsWithPreview(text, "1003074184/13");
+        assertNotContainsWithPreview(text, "АА 17226041");
+        assertNotContainsWithPreview(text, "1537512052");
+    }
+
+    @Test
+    void testStatementFamilyBlockForSingleNoChildren() throws Exception {
+        String text = extract(service.generateStatementDocx(smirnovClient()));
+        assertContainsWithPreview(text, "В браке не состоит");
+        assertContainsWithPreview(text, "Несовершеннолетних детей на иждивении не имеет");
+        assertNotContainsWithPreview(text, "свидетельству о заключении брака");
+        assertNotContainsWithPreview(text, "свидетельству о рождении");
+        assertNotContainsWithPreview(text, "Наймушина");
+        assertNotContainsWithPreview(text, "Алёна");
+    }
+
+    @Test
+    void testStatementVehicleBlockUsesCurrentVehicle() throws Exception {
+        String text = extract(service.generateStatementDocx(smirnovClient()));
+        assertContainsWithPreview(text, "Lada");
+        assertContainsWithPreview(text, "Granta");
+        assertContainsWithPreview(text, "В321ОР174");
+        assertNotContainsWithPreview(text, "MITSUBISHI RVR");
+    }
+
+    @Test
+    void testAppendix2ContainsCurrentVehicleWhenVehicleExists() throws Exception {
+        BankruptcyApplicationData data = smirnovClient();
+        String text = extract(service.generateAppendixTwoDocx(
+                data,
+                data.propertyInfo().realEstateItems(),
+                data.propertyInfo().vehicles(),
+                List.of()
+        ));
+        assertContainsWithPreview(text, "Lada");
+        assertContainsWithPreview(text, "Granta");
+        assertContainsWithPreview(text, "В321ОР174");
+        assertNotContainsWithPreview(text, "MITSUBISHI RVR");
+    }
+
+    @Test
+    void testAttachmentsBlockDependsOnFamilyAndProperty() throws Exception {
+        String text = extract(service.generateStatementDocx(smirnovClient()));
+        assertNotContainsWithPreview(text, "Копия свидетельства о заключении брака");
+        assertNotContainsWithPreview(text, "Копия свидетельства о рождении");
+    }
+
+    @Test
+    void testGeneratedZipForSmirnovHasConsistentData() throws Exception {
+        byte[] zip = service.generateZip(smirnovClient());
+        List<byte[]> docs = readDocxEntries(zip);
+        assertEquals(3, docs.size());
+        for (byte[] doc : docs) {
+            String text = extract(doc);
+            assertContainsWithPreview(text, "Смирнов Андрей Павлович");
+            assertNotContainsWithPreview(text, "Захаров");
+            assertNotContainsWithPreview(text, "MITSUBISHI RVR");
+            assertNotContainsWithPreview(text, "ВЭББАНКИР");
+            assertNotContainsWithPreview(text, "ТУРБОЗАЙМ");
+            assertNotContainsWithPreview(text, "МИГКРЕДИТ");
+            assertNotContainsWithPreview(text, "1003074184/13");
+            assertNotContainsWithPreview(text, "АА 17226041");
+            assertNotContainsWithPreview(text, "1537512052");
+        }
+    }
+
     private BankruptcyApplicationData ivanovClient() {
         Address address = new Address("Россия", "г. Москва", "Москва", "Ленинская Слобода", "19", "12", "115280");
         Debtor debtor = new Debtor(
@@ -209,6 +317,47 @@ class DocumentGenerationServiceTest {
                 new FamilyInfo(false, "Иванова Мария Сергеевна", List.of()),
                 new EmploymentInfo("UNEMPLOYED", "", "", BigDecimal.ZERO),
                 new PropertyInfo(List.of(), List.of(), false)
+        );
+    }
+
+    private BankruptcyApplicationData smirnovClient() {
+        Address address = new Address("Россия", "Челябинская область", "Челябинск", "ул. Труда", "18", "7", "454091");
+        Debtor debtor = new Debtor(
+                "Смирнов Андрей Павлович",
+                LocalDate.of(1992, 2, 10),
+                "221-334-556 77",
+                "744700112233",
+                "7509 123456",
+                address,
+                address,
+                "79001112233",
+                "smirnov-ap@example.com",
+                "г. Челябинск"
+        );
+
+        List<Creditor> creditors = List.of(
+                new Creditor("ПАО ВТБ", "7702070139", List.of(
+                        new Contract("VTB-2041 от 17.04.2024", "loan", new BigDecimal("180000.00"), BigDecimal.ZERO, BigDecimal.ZERO),
+                        new Contract("VTB-CC-87 от 03.06.2024", "card", new BigDecimal("76000.00"), BigDecimal.ZERO, BigDecimal.ZERO)
+                )),
+                new Creditor("ООО МФК Займер", "4205294274", List.of(
+                        new Contract("ZM-5512 от 12.01.2025", "microloan", new BigDecimal("34000.00"), BigDecimal.ZERO, BigDecimal.ZERO)
+                )),
+                new Creditor("ООО МКК Деньги Сразу", "6453137601", List.of(
+                        new Contract("DS-908 от 28.01.2025", "microloan", new BigDecimal("21500.00"), BigDecimal.ZERO, BigDecimal.ZERO)
+                ))
+        );
+
+        return new BankruptcyApplicationData(
+                debtor,
+                creditors,
+                new FamilyInfo(false, "", List.of()),
+                new EmploymentInfo("UNEMPLOYED", "", "", BigDecimal.ZERO),
+                new PropertyInfo(
+                        List.of(new Vehicle("легковой автомобиль", "Lada", "Granta", "В321ОР174", 2019)),
+                        List.of(),
+                        false
+                )
         );
     }
 
