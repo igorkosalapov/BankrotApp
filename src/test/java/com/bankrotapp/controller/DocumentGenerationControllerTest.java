@@ -74,7 +74,7 @@ class DocumentGenerationControllerTest {
 
         byte[] zipBytes = result.getResponse().getContentAsByteArray();
         List<String> fileNames = new ArrayList<>();
-        String appendixOneText = "";
+        String[] appendixOneText = {""};
 
         try (ZipInputStream zipInputStream = new ZipInputStream(new ByteArrayInputStream(zipBytes), StandardCharsets.UTF_8)) {
             ZipEntry entry;
@@ -84,7 +84,7 @@ class DocumentGenerationControllerTest {
                 if (entry.getName().startsWith("Prilozhenie_1_")) {
                     try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(readEntryBytes(zipInputStream)));
                          XWPFWordExtractor extractor = new XWPFWordExtractor(document)) {
-                        appendixOneText = extractor.getText();
+                        appendixOneText[0] = extractor.getText();
                     }
                 }
             }
@@ -95,7 +95,7 @@ class DocumentGenerationControllerTest {
                 () -> assertTrue(fileNames.stream().anyMatch(name -> name.equals("Zayavlenie_Иванов_Иван_Иванович.docx")), "ZIP должен содержать заявление с ФИО в имени файла."),
                 () -> assertTrue(fileNames.stream().anyMatch(name -> name.equals("Prilozhenie_1_Иванов_Иван_Иванович.docx")), "ZIP должен содержать приложение №1 с ФИО в имени файла."),
                 () -> assertTrue(fileNames.stream().anyMatch(name -> name.equals("Prilozhenie_2_Иванов_Иван_Иванович.docx")), "ZIP должен содержать приложение №2 с ФИО в имени файла."),
-                () -> assertTrue(appendixOneText.contains("Список кредиторов и должников гражданина"), "Приложение №1 в ZIP должно корректно генерироваться.")
+                () -> assertTrue(appendixOneText[0].contains("Список кредиторов и должников гражданина"), "Приложение №1 в ZIP должно корректно генерироваться.")
         );
     }
 
