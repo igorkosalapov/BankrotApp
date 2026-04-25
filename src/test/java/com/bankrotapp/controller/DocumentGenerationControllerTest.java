@@ -152,7 +152,43 @@ class DocumentGenerationControllerTest {
 
     @Test
     void shouldGenerateZipWithThreeDocxFilesAndDebtorFioInFileNames() throws Exception {
-        MvcResult result = mockMvc.perform(post("/generate"))
+        String payload = """
+                {
+                  "debtor": {
+                    "fullName": "Захаров Владимир Игоревич",
+                    "birthDate": "1989-03-14",
+                    "snils": "112-233-445 95",
+                    "inn": "770123456789",
+                    "passportNumber": "4510 123456",
+                    "registrationAddress": {
+                      "country": "Россия",
+                      "region": "г. Москва",
+                      "city": "Москва",
+                      "street": "Тверская",
+                      "house": "10",
+                      "apartment": "15",
+                      "postalCode": "125009"
+                    },
+                    "actualAddress": {
+                      "country": "Россия",
+                      "region": "г. Москва",
+                      "city": "Москва",
+                      "street": "Тверская",
+                      "house": "10",
+                      "apartment": "15",
+                      "postalCode": "125009"
+                    },
+                    "phone": "79161234567",
+                    "email": "zakharov@example.com",
+                    "birthPlace": "г. Москва"
+                  },
+                  "creditors": []
+                }
+                """;
+
+        MvcResult result = mockMvc.perform(post("/generate")
+                        .contentType("application/json")
+                        .content(payload))
                 .andExpect(status().isOk())
                 .andExpect(header().string("Content-Type", containsString("application/zip")))
                 .andReturn();
@@ -166,7 +202,7 @@ class DocumentGenerationControllerTest {
             while ((entry = zipInputStream.getNextEntry()) != null) {
                 fileNames.add(entry.getName());
 
-                if (entry.getName().startsWith("Prilozhenie_1_")) {
+                if (entry.getName().startsWith("Приложение_1_")) {
                     try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(readEntryBytes(zipInputStream)));
                          XWPFWordExtractor extractor = new XWPFWordExtractor(document)) {
                         appendixOneText[0] = extractor.getText();
@@ -177,11 +213,19 @@ class DocumentGenerationControllerTest {
 
         assertAll(
                 () -> assertEquals(3, fileNames.size(), "ZIP должен содержать три DOCX-файла."),
-                () -> assertTrue(fileNames.stream().anyMatch(name -> name.equals("Zayavlenie_Иванов_Иван_Иванович.docx")), "ZIP должен содержать заявление с ФИО в имени файла."),
-                () -> assertTrue(fileNames.stream().anyMatch(name -> name.equals("Prilozhenie_1_Иванов_Иван_Иванович.docx")), "ZIP должен содержать приложение №1 с ФИО в имени файла."),
-                () -> assertTrue(fileNames.stream().anyMatch(name -> name.equals("Prilozhenie_2_Иванов_Иван_Иванович.docx")), "ZIP должен содержать приложение №2 с ФИО в имени файла."),
+                () -> assertTrue(fileNames.stream().anyMatch(name -> name.equals("Заявление_о_банкротстве_Захаров_Владимир_Игоревич.docx")), "ZIP должен содержать заявление с ФИО в имени файла."),
+                () -> assertTrue(fileNames.stream().anyMatch(name -> name.equals("Приложение_1_Список_кредиторов_Захаров_Владимир_Игоревич.docx")), "ZIP должен содержать приложение №1 с ФИО в имени файла."),
+                () -> assertTrue(fileNames.stream().anyMatch(name -> name.equals("Приложение_2_Опись_имущества_Захаров_Владимир_Игоревич.docx")), "ZIP должен содержать приложение №2 с ФИО в имени файла."),
                 () -> assertTrue(appendixOneText[0].contains("Список кредиторов и должников гражданина"), "Приложение №1 в ZIP должно корректно генерироваться.")
         );
+    }
+
+
+    @Test
+    void shouldRedirectToFormWhenGenerateCalledWithoutSessionAndBody() throws Exception {
+        mockMvc.perform(post("/generate"))
+                .andExpect(status().isSeeOther())
+                .andExpect(header().string("Location", containsString("/?error=")));
     }
 
     @Test
