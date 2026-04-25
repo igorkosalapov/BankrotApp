@@ -50,6 +50,8 @@ class DocumentGenerationServiceTest {
 
         assertTrue(text.contains("Иванов Сергей Николаевич"));
         assertFalse(text.contains("Захаров Владимир Игоревич"));
+        assertFalse(text.contains("Захаров В. И."));
+        assertFalse(text.contains("Захаров"));
     }
 
     @Test
@@ -59,6 +61,8 @@ class DocumentGenerationServiceTest {
 
         assertTrue(text.contains("Иванов Сергей Николаевич"));
         assertFalse(text.contains("Захаров Владимир Игоревич"));
+        assertFalse(text.contains("Захаров В. И."));
+        assertFalse(text.contains("Захаров"));
     }
 
     @Test
