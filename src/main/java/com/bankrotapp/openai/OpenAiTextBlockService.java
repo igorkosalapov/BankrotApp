@@ -2,6 +2,7 @@ package com.bankrotapp.openai;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -83,20 +84,25 @@ public class OpenAiTextBlockService {
                 + "Не добавляй фактов, которых нет во входных данных."
                 + " Ответ строго в JSON.";
 
-        JsonNode payload = objectMapper.createObjectNode()
-                .put("model", model)
-                .put("temperature", 0.2)
-                .set("response_format", objectMapper.createObjectNode().put("type", "json_object"))
-                .set("messages", objectMapper.createArrayNode()
-                        .add(objectMapper.createObjectNode()
-                                .put("role", "system")
-                                .put("content", "Ты помощник по юридическим документам. "
-                                        + "Верни строго JSON с полями hardshipReason, employmentIncomeDescription, loanFundsUsageDescription. "
-                                        + "Запрещено выдумывать: ФИО, суммы, даты, кредиторов, имущество, документы, юридические ссылки. "
-                                        + "Если данных мало — используй нейтральные формулировки без конкретики."))
-                        .add(objectMapper.createObjectNode()
-                                .put("role", "user")
-                                .put("content", userPrompt)));
+        JsonNode responseFormat = objectMapper.createObjectNode()
+                .put("type", "json_object");
+
+        JsonNode messages = objectMapper.createArrayNode()
+                .add(objectMapper.createObjectNode()
+                        .put("role", "system")
+                        .put("content", "Ты помощник по юридическим документам. "
+                                + "Верни строго JSON с полями hardshipReason, employmentIncomeDescription, loanFundsUsageDescription. "
+                                + "Запрещено выдумывать: ФИО, суммы, даты, кредиторов, имущество, документы, юридические ссылки. "
+                                + "Если данных мало — используй нейтральные формулировки без конкретики."))
+                .add(objectMapper.createObjectNode()
+                        .put("role", "user")
+                        .put("content", userPrompt));
+
+        ObjectNode payload = objectMapper.createObjectNode();
+        payload.put("model", model);
+        payload.put("temperature", 0.2);
+        payload.set("response_format", responseFormat);
+        payload.set("messages", messages);
 
         return objectMapper.writeValueAsString(payload);
     }
