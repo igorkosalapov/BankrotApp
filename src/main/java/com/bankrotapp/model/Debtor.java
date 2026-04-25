@@ -11,6 +11,7 @@ public record Debtor(
         Address registrationAddress,
         Address actualAddress,
         String phone,
-        String email
+        String email,
+        String birthPlace
 ) {
 }
