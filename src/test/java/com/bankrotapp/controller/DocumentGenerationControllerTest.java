@@ -66,6 +66,91 @@ class DocumentGenerationControllerTest {
     }
 
     @Test
+    void shouldUseRequestBodyDataForAppendixOneGeneration() throws Exception {
+        String payload = """
+                {
+                  "debtor": {
+                    "fullName": "Петров Петр Петрович",
+                    "birthDate": "1990-01-01",
+                    "snils": "111-111-111 11",
+                    "inn": "123456789012",
+                    "passportNumber": "4500 000000",
+                    "registrationAddress": {
+                      "country": "Россия",
+                      "region": "г. Москва",
+                      "city": "Москва",
+                      "street": "Арбат",
+                      "house": "1",
+                      "apartment": "1",
+                      "postalCode": "119019"
+                    },
+                    "actualAddress": {
+                      "country": "Россия",
+                      "region": "г. Москва",
+                      "city": "Москва",
+                      "street": "Арбат",
+                      "house": "1",
+                      "apartment": "1",
+                      "postalCode": "119019"
+                    },
+                    "phone": "79000000000",
+                    "email": "petrov@example.com",
+                    "birthPlace": "г. Москва"
+                  },
+                  "creditors": [
+                    {
+                      "name": "Кредитор Тест",
+                      "inn": "0000000000",
+                      "contracts": [
+                        {
+                          "contractNumber": "Договор №1",
+                          "contractType": "loan",
+                          "principalDebt": 1000.00,
+                          "interestDebt": 100.00,
+                          "penalties": 10.00
+                        }
+                      ]
+                    }
+                  ]
+                }
+                """;
+
+        MvcResult result = mockMvc.perform(post("/generate/appendix-1")
+                        .contentType("application/json")
+                        .content(payload))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        byte[] docxBytes = result.getResponse().getContentAsByteArray();
+        String text;
+        String surnameInCitizenBlock;
+        String totalAmountCell;
+        String debtAmountCell;
+        String penaltiesCell;
+
+        try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(docxBytes));
+             XWPFWordExtractor extractor = new XWPFWordExtractor(document)) {
+            text = extractor.getText();
+
+            XWPFTable citizenTable = document.getTables().get(0);
+            surnameInCitizenBlock = citizenTable.getRow(1).getCell(2).getText().trim();
+
+            XWPFTable creditorsTable = document.getTables().get(1);
+            totalAmountCell = creditorsTable.getRow(4).getCell(5).getText().trim();
+            debtAmountCell = creditorsTable.getRow(4).getCell(6).getText().trim();
+            penaltiesCell = creditorsTable.getRow(4).getCell(7).getText().trim();
+        }
+
+        assertAll(
+                () -> assertEquals("Петров", surnameInCitizenBlock, "Должно использоваться ФИО из request body."),
+                () -> assertTrue(text.contains("Кредитор Тест"), "Должен использоваться кредитор из request body."),
+                () -> assertEquals("1\u00A0110,00", totalAmountCell, "Колонка общей суммы должна учитывать principal + interest + penalties."),
+                () -> assertEquals("1\u00A0100,00", debtAmountCell, "Колонка суммы задолженности должна учитывать principal + interest."),
+                () -> assertEquals("10,00", penaltiesCell, "Колонка неустоек должна содержать penalties.")
+        );
+    }
+
+    @Test
     void shouldGenerateZipWithThreeDocxFilesAndDebtorFioInFileNames() throws Exception {
         MvcResult result = mockMvc.perform(post("/generate"))
                 .andExpect(status().isOk())
