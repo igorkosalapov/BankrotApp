@@ -124,6 +124,9 @@ class DocumentGenerationControllerTest {
         byte[] docxBytes = result.getResponse().getContentAsByteArray();
         String text;
         String surnameInCitizenBlock;
+        String totalAmountCell;
+        String debtAmountCell;
+        String penaltiesCell;
 
         try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(docxBytes));
              XWPFWordExtractor extractor = new XWPFWordExtractor(document)) {
@@ -131,12 +134,19 @@ class DocumentGenerationControllerTest {
 
             XWPFTable citizenTable = document.getTables().get(0);
             surnameInCitizenBlock = citizenTable.getRow(1).getCell(2).getText().trim();
+
+            XWPFTable creditorsTable = document.getTables().get(1);
+            totalAmountCell = creditorsTable.getRow(4).getCell(5).getText().trim();
+            debtAmountCell = creditorsTable.getRow(4).getCell(6).getText().trim();
+            penaltiesCell = creditorsTable.getRow(4).getCell(7).getText().trim();
         }
 
         assertAll(
                 () -> assertEquals("Петров", surnameInCitizenBlock, "Должно использоваться ФИО из request body."),
                 () -> assertTrue(text.contains("Кредитор Тест"), "Должен использоваться кредитор из request body."),
-                () -> assertTrue(text.contains("1 110,00"), "Должна учитываться сумма principal + interest + penalties.")
+                () -> assertEquals("1\u00A0110,00", totalAmountCell, "Колонка общей суммы должна учитывать principal + interest + penalties."),
+                () -> assertEquals("1\u00A0100,00", debtAmountCell, "Колонка суммы задолженности должна учитывать principal + interest."),
+                () -> assertEquals("10,00", penaltiesCell, "Колонка неустоек должна содержать penalties.")
         );
     }
 
