@@ -22,7 +22,7 @@ import java.util.regex.Pattern;
 @Component
 public class DocxTemplateRenderer {
 
-    private static final Pattern PLACEHOLDER_PATTERN = Pattern.compile("\\\\{\\\\{[^{}]+}}");
+    private static final Pattern PLACEHOLDER_PATTERN = Pattern.compile("\\{\\{[^{}]+}}");
 
     public byte[] render(InputStream templateStream, Map<String, String> placeholders) throws IOException {
         try (XWPFDocument document = new XWPFDocument(templateStream)) {
