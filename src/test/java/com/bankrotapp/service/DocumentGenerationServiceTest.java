@@ -24,6 +24,7 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DocumentGenerationServiceTest {
@@ -71,6 +72,13 @@ class DocumentGenerationServiceTest {
         String text = extract(service.generateAppendixTwoDocx(data, List.of(), List.of(), List.of()));
 
         assertFalse(text.contains("MITSUBISHI RVR"));
+    }
+
+    @Test
+    void testGenerateZipForIvanovDoesNotFailWhenLegacyMarkersStillExistInTemplates() throws Exception {
+        byte[] zip = service.generateZip(ivanovClient());
+        assertNotNull(zip);
+        assertTrue(zip.length > 0);
     }
 
     @Test

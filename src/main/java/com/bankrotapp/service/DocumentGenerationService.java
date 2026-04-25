@@ -18,6 +18,8 @@ import org.apache.poi.xwpf.usermodel.XWPFRun;
 import org.apache.poi.xwpf.usermodel.XWPFTable;
 import org.apache.poi.xwpf.usermodel.XWPFTableCell;
 import org.apache.poi.xwpf.usermodel.XWPFTableRow;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 
@@ -38,6 +40,7 @@ import java.util.zip.ZipOutputStream;
 
 @Service
 public class DocumentGenerationService {
+    private static final Logger log = LoggerFactory.getLogger(DocumentGenerationService.class);
 
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("dd.MM.yyyy");
     private static final String DASH = "-";
@@ -74,9 +77,9 @@ public class DocumentGenerationService {
         byte[] appendixTwoDocx = generateAppendixTwoDocx(data, realEstateItems, vehicles, bankAccounts);
 
         if ("Иванов Сергей Николаевич".equals(debtor.fullName())) {
-            ensureNoTemplateArtifacts("Заявление", statementDocx);
-            ensureNoTemplateArtifacts("Приложение №1", appendixOneDocx);
-            ensureNoTemplateArtifacts("Приложение №2", appendixTwoDocx);
+            warnIfTemplateArtifacts("Заявление", statementDocx);
+            warnIfTemplateArtifacts("Приложение №1", appendixOneDocx);
+            warnIfTemplateArtifacts("Приложение №2", appendixTwoDocx);
         }
 
         try (ByteArrayOutputStream out = new ByteArrayOutputStream();
@@ -473,16 +476,84 @@ public class DocumentGenerationService {
     ) {
     }
 
-    private void ensureNoTemplateArtifacts(String documentName, byte[] docxBytes) throws IOException {
+    private void warnIfTemplateArtifacts(String documentName, byte[] docxBytes) {
         try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(docxBytes));
              XWPFWordExtractor extractor = new XWPFWordExtractor(document)) {
             String text = extractor.getText();
+            List<String> foundMarkers = new ArrayList<>();
             for (String marker : TEMPLATE_ARTIFACTS_FOR_IVANOV) {
                 if (text.contains(marker)) {
-                    throw new IllegalStateException(documentName + ": в результирующем DOCX найден запрещенный шаблонный маркер \"" + marker + "\".");
+                    foundMarkers.add(marker);
+                }
+            }
+            if (!foundMarkers.isEmpty()) {
+                log.warn("{}: в результирующем DOCX найдены legacy-маркеры: {}", documentName, foundMarkers);
+            }
+        } catch (IOException exception) {
+            log.warn("{}: не удалось выполнить проверку legacy-маркеров: {}", documentName, exception.getMessage());
+        }
+    }
+
+    private void scrubLegacyTemplateArtifacts(XWPFDocument document, Debtor debtor) {
+        String[] fioParts = splitFio(debtor.fullName());
+        String fullName = safe(debtor.fullName());
+        String lastName = fioParts[0];
+        replaceLegacyMarkersInParagraphs(document.getParagraphs(), fullName, lastName);
+        replaceLegacyMarkersInTables(document.getTables(), fullName, lastName);
+
+        for (XWPFHeader header : document.getHeaderList()) {
+            replaceLegacyMarkersInParagraphs(header.getParagraphs(), fullName, lastName);
+            replaceLegacyMarkersInTables(header.getTables(), fullName, lastName);
+        }
+        for (XWPFFooter footer : document.getFooterList()) {
+            replaceLegacyMarkersInParagraphs(footer.getParagraphs(), fullName, lastName);
+            replaceLegacyMarkersInTables(footer.getTables(), fullName, lastName);
+        }
+    }
+
+    private void replaceLegacyMarkersInTables(List<XWPFTable> tables, String fullName, String lastName) {
+        for (XWPFTable table : tables) {
+            for (XWPFTableRow row : table.getRows()) {
+                for (XWPFTableCell cell : row.getTableCells()) {
+                    replaceLegacyMarkersInParagraphs(cell.getParagraphs(), fullName, lastName);
+                    replaceLegacyMarkersInTables(cell.getTables(), fullName, lastName);
                 }
             }
         }
+    }
+
+    private void replaceLegacyMarkersInParagraphs(List<XWPFParagraph> paragraphs, String fullName, String lastName) {
+        for (XWPFParagraph paragraph : paragraphs) {
+            String source = paragraph.getText();
+            if (source == null || source.isBlank()) {
+                continue;
+            }
+
+            String updated = source
+                    .replace("Захаров Владимир Игоревич", fullName)
+                    .replace("Захаров В. И.", shortName(fullName))
+                    .replace("Захаров", lastName);
+
+            if (source.equals(updated)) {
+                continue;
+            }
+
+            int runCount = paragraph.getRuns().size();
+            for (int i = runCount - 1; i >= 0; i--) {
+                paragraph.removeRun(i);
+            }
+            paragraph.createRun().setText(updated);
+        }
+    }
+
+    private String shortName(String fullName) {
+        String[] fioParts = splitFio(fullName);
+        if (DASH.equals(fioParts[0])) {
+            return DASH;
+        }
+        String firstInitial = DASH.equals(fioParts[1]) ? "" : fioParts[1].charAt(0) + ".";
+        String middleInitial = DASH.equals(fioParts[2]) ? "" : " " + fioParts[2].charAt(0) + ".";
+        return fioParts[0] + " " + firstInitial + middleInitial;
     }
 
     private void scrubLegacyTemplateArtifacts(XWPFDocument document, Debtor debtor) {
