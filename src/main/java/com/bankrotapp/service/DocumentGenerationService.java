@@ -44,7 +44,6 @@ public class DocumentGenerationService {
 
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("dd.MM.yyyy");
     private static final String DASH = "-";
-    private static final String TEMPLATE_STATEMENT = "templates/zayavlenie.docx";
     private static final String TEMPLATE_APPENDIX_1 = "templates/prilozhenie_1.docx";
     private static final String TEMPLATE_APPENDIX_2 = "templates/prilozhenie_2.docx";
     private static final List<String> TEMPLATE_ARTIFACTS_FOR_IVANOV = List.of(
@@ -125,7 +124,43 @@ public class DocumentGenerationService {
     }
 
     public byte[] generateStatementDocx(BankruptcyApplicationData data) throws IOException {
-        return renderTemplate(TEMPLATE_STATEMENT, placeholders(data));
+        Debtor debtor = data.debtor();
+        List<Creditor> creditors = data.creditors() == null ? List.of() : data.creditors();
+        String totalDebt = debtCalculationService.formatAmountRu(debtCalculationService.calculateTotalDebt(creditors));
+
+        try (XWPFDocument document = new XWPFDocument();
+             ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            appendParagraph(document, "ЗАЯВЛЕНИЕ о признании гражданина банкротом", true);
+            appendParagraph(document, "Должник: " + safe(debtor.fullName()), false);
+            appendParagraph(document, "Дата рождения: "
+                    + (debtor.birthDate() == null ? DASH : debtor.birthDate().format(DATE_FORMATTER)), false);
+            appendParagraph(document, "Место рождения: " + safe(debtor.birthPlace()), false);
+            appendParagraph(document, "Адрес регистрации: " + formatAddress(debtor.registrationAddress()), false);
+            appendParagraph(document, "СНИЛС: " + safe(debtor.snils()), false);
+            appendParagraph(document, "ИНН: " + safe(debtor.inn()), false);
+            appendParagraph(document, "Паспорт: " + safe(debtor.passportNumber()), false);
+            appendParagraph(document, "Кредиторы:", true);
+            if (creditors.isEmpty()) {
+                appendParagraph(document, "Кредиторы отсутствуют.", false);
+            } else {
+                for (Creditor creditor : creditors) {
+                    appendParagraph(document, "- " + safe(creditor.name()), false);
+                }
+            }
+            appendParagraph(document, "Общая сумма задолженности: " + totalDebt, true);
+            appendParagraph(document, "Приложения: Приложение №1; Приложение №2.", false);
+            appendParagraph(document, "Подпись: " + safe(debtor.fullName()), false);
+
+            document.write(out);
+            return out.toByteArray();
+        }
+    }
+
+    private void appendParagraph(XWPFDocument document, String text, boolean bold) {
+        XWPFParagraph paragraph = document.createParagraph();
+        XWPFRun run = paragraph.createRun();
+        run.setBold(bold);
+        run.setText(text);
     }
 
     private byte[] renderTemplate(String templatePath, Map<String, String> placeholders) throws IOException {
