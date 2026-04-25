@@ -11,7 +11,13 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.regex.Pattern;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.junit.jupiter.api.Assertions.assertAll;
@@ -33,7 +39,7 @@ class DocumentGenerationControllerTest {
 
     @Test
     void shouldGenerateAppendixOneDocxWithoutUnresolvedPlaceholders() throws Exception {
-        MvcResult result = mockMvc.perform(post("/generate"))
+        MvcResult result = mockMvc.perform(post("/generate/appendix-1"))
                 .andExpect(status().isOk())
                 .andExpect(header().string("Content-Type", containsString("application/vnd.openxmlformats-officedocument.wordprocessingml.document")))
                 .andReturn();
@@ -56,6 +62,40 @@ class DocumentGenerationControllerTest {
                 () -> assertEquals("Иванов", surnameInCitizenBlock, "Фамилия в блоке гражданина должна быть заменена данными должника."),
                 () -> assertTrue(text.contains("Банк А"), "Таблица кредиторов должна содержать первого кредитора."),
                 () -> assertTrue(text.contains("МФО Б"), "Таблица кредиторов должна содержать второго кредитора.")
+        );
+    }
+
+    @Test
+    void shouldGenerateZipWithThreeDocxFilesAndDebtorFioInFileNames() throws Exception {
+        MvcResult result = mockMvc.perform(post("/generate"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Content-Type", containsString("application/zip")))
+                .andReturn();
+
+        byte[] zipBytes = result.getResponse().getContentAsByteArray();
+        List<String> fileNames = new ArrayList<>();
+        String appendixOneText = "";
+
+        try (ZipInputStream zipInputStream = new ZipInputStream(new ByteArrayInputStream(zipBytes), StandardCharsets.UTF_8)) {
+            ZipEntry entry;
+            while ((entry = zipInputStream.getNextEntry()) != null) {
+                fileNames.add(entry.getName());
+
+                if (entry.getName().startsWith("Prilozhenie_1_")) {
+                    try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(readEntryBytes(zipInputStream)));
+                         XWPFWordExtractor extractor = new XWPFWordExtractor(document)) {
+                        appendixOneText = extractor.getText();
+                    }
+                }
+            }
+        }
+
+        assertAll(
+                () -> assertEquals(3, fileNames.size(), "ZIP должен содержать три DOCX-файла."),
+                () -> assertTrue(fileNames.stream().anyMatch(name -> name.equals("Zayavlenie_Иванов_Иван_Иванович.docx")), "ZIP должен содержать заявление с ФИО в имени файла."),
+                () -> assertTrue(fileNames.stream().anyMatch(name -> name.equals("Prilozhenie_1_Иванов_Иван_Иванович.docx")), "ZIP должен содержать приложение №1 с ФИО в имени файла."),
+                () -> assertTrue(fileNames.stream().anyMatch(name -> name.equals("Prilozhenie_2_Иванов_Иван_Иванович.docx")), "ZIP должен содержать приложение №2 с ФИО в имени файла."),
+                () -> assertTrue(appendixOneText.contains("Список кредиторов и должников гражданина"), "Приложение №1 в ZIP должно корректно генерироваться.")
         );
     }
 
@@ -98,5 +138,15 @@ class DocumentGenerationControllerTest {
                 () -> assertTrue(passengerCarBlock.contains("Hyundai Solaris 2017"), "Категория легковых автомобилей должна быть заполнена транспортом."),
                 () -> assertEquals("-", bankCellValue, "При отсутствии банковских счетов должны проставляться прочерки.")
         );
+    }
+
+    private byte[] readEntryBytes(ZipInputStream zipInputStream) throws Exception {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        byte[] buffer = new byte[4096];
+        int read;
+        while ((read = zipInputStream.read(buffer)) > 0) {
+            out.write(buffer, 0, read);
+        }
+        return out.toByteArray();
     }
 }
