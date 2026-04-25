@@ -26,7 +26,7 @@ import java.util.List;
 @RestController
 public class DocumentGenerationController {
 
-    public static final String SESSION_PREVIEW_DATA = "previewData";
+    public static final String SESSION_PREVIEW_DATA = "bankruptcyApplicationData";
 
     private final DocumentGenerationService documentGenerationService;
 
@@ -43,9 +43,8 @@ public class DocumentGenerationController {
     }
 
     @PostMapping(value = "/generate", produces = "application/zip")
-    public ResponseEntity<byte[]> generateDocumentsArchive(@RequestBody(required = false) BankruptcyApplicationData request,
-                                                           HttpSession session) throws IOException {
-        BankruptcyApplicationData data = normalizeData(resolveRequiredData(request, session));
+    public ResponseEntity<byte[]> generateDocumentsArchive(HttpSession session) throws IOException {
+        BankruptcyApplicationData data = normalizeData(resolveRequiredData(session));
         byte[] zip = documentGenerationService.generateZip(data);
 
         HttpHeaders headers = new HttpHeaders();
@@ -83,10 +82,7 @@ public class DocumentGenerationController {
         return ResponseEntity.ok().headers(headers).body(generated);
     }
 
-    private BankruptcyApplicationData resolveRequiredData(BankruptcyApplicationData request, HttpSession session) {
-        if (request != null) {
-            return request;
-        }
+    private BankruptcyApplicationData resolveRequiredData(HttpSession session) {
         Object fromSession = session.getAttribute(SESSION_PREVIEW_DATA);
         if (fromSession instanceof BankruptcyApplicationData bankruptcyApplicationData) {
             return bankruptcyApplicationData;

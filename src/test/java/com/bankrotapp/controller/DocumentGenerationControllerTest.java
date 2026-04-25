@@ -152,43 +152,15 @@ class DocumentGenerationControllerTest {
 
     @Test
     void shouldGenerateZipWithThreeDocxFilesAndDebtorFioInFileNames() throws Exception {
-        String payload = """
-                {
-                  "debtor": {
-                    "fullName": "Захаров Владимир Игоревич",
-                    "birthDate": "1989-03-14",
-                    "snils": "112-233-445 95",
-                    "inn": "770123456789",
-                    "passportNumber": "4510 123456",
-                    "registrationAddress": {
-                      "country": "Россия",
-                      "region": "г. Москва",
-                      "city": "Москва",
-                      "street": "Тверская",
-                      "house": "10",
-                      "apartment": "15",
-                      "postalCode": "125009"
-                    },
-                    "actualAddress": {
-                      "country": "Россия",
-                      "region": "г. Москва",
-                      "city": "Москва",
-                      "street": "Тверская",
-                      "house": "10",
-                      "apartment": "15",
-                      "postalCode": "125009"
-                    },
-                    "phone": "79161234567",
-                    "email": "zakharov@example.com",
-                    "birthPlace": "г. Москва"
-                  },
-                  "creditors": []
-                }
-                """;
+        MvcResult previewResult = mockMvc.perform(post("/preview")
+                        .contentType("application/x-www-form-urlencoded")
+                        .param("fullName", "Захаров Владимир Игоревич")
+                        .param("creditorLines", "Банк А|Договор 1|1000"))
+                .andExpect(status().isOk())
+                .andReturn();
 
         MvcResult result = mockMvc.perform(post("/generate")
-                        .contentType("application/json")
-                        .content(payload))
+                        .session((org.springframework.mock.web.MockHttpSession) previewResult.getRequest().getSession(false)))
                 .andExpect(status().isOk())
                 .andExpect(header().string("Content-Type", containsString("application/zip")))
                 .andReturn();
