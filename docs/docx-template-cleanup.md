@@ -4,17 +4,21 @@
 
 ## Основные команды
 
-1. Пересоздать чистые шаблоны:
+### Windows
 
-```bash
-mvn -q -DskipTests exec:java -Dexec.mainClass=com.bankrotapp.template.TemplateCleanupTool
+```bat
+scripts\template-cleanup.cmd
+scripts\template-audit.cmd
 ```
 
-2. Проверить шаблоны на запрещённые legacy-строки:
+### Linux / macOS
 
 ```bash
-mvn -q -DskipTests exec:java -Dexec.mainClass=com.bankrotapp.template.TemplateAuditTool
+./scripts/template-cleanup.sh
+./scripts/template-audit.sh
 ```
+
+Скрипты вычисляют путь к `pom.xml` относительно своего расположения, поэтому их можно запускать из любой директории.
 
 ## Что делает `TemplateCleanupTool`
 
