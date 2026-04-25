@@ -5,8 +5,11 @@ import com.bankrotapp.model.BankAccount;
 import com.bankrotapp.model.Contract;
 import com.bankrotapp.model.Creditor;
 import com.bankrotapp.model.Debtor;
+import com.bankrotapp.model.EmploymentInfo;
+import com.bankrotapp.model.PropertyInfo;
 import com.bankrotapp.model.RealEstateItem;
 import com.bankrotapp.model.Vehicle;
+import com.bankrotapp.model.BankruptcyApplicationData;
 import com.bankrotapp.service.DebtCalculationService;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.apache.poi.xwpf.usermodel.XWPFParagraph;
@@ -20,6 +23,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.io.ByteArrayOutputStream;
@@ -47,39 +51,12 @@ public class DocumentGenerationController {
     }
 
     @PostMapping(value = "/generate", produces = "application/zip")
-    public ResponseEntity<byte[]> generateDocumentsArchive() throws IOException {
-        Debtor debtor = new Debtor(
-                "Иванов Иван Иванович",
-                LocalDate.of(1989, 3, 14),
-                "112-233-445 95",
-                "770123456789",
-                "4510 123456",
-                new Address("Россия", "г. Москва", "Москва", "Тверская", "10", "15", "125009"),
-                new Address("Россия", "г. Москва", "Москва", "Тверская", "10", "15", "125009"),
-                "79161234567",
-                "ivanov@example.com",
-                "г. Москва"
-        );
-
-        List<Creditor> creditors = List.of(
-                new Creditor(
-                        "Банк А",
-                        "7700000000",
-                        List.of(new Contract("Кредитный договор № 1 от 10.01.2024", "loan", new BigDecimal("150000.00"), BigDecimal.ZERO, BigDecimal.ZERO))
-                ),
-                new Creditor(
-                        "МФО Б",
-                        "7800000000",
-                        List.of(new Contract("Договор займа № 77 от 03.02.2025", "microloan", new BigDecimal("25000.00"), BigDecimal.ZERO, BigDecimal.ZERO))
-                )
-        );
-
-        List<RealEstateItem> realEstateItems = List.of(
-                new RealEstateItem("квартира", debtor.registrationAddress(), 62.4, "Собственность")
-        );
-        List<Vehicle> vehicles = List.of(
-                new Vehicle("легковой автомобиль", "Hyundai", "Solaris", "X7LBR32AAB1234567", 2017)
-        );
+    public ResponseEntity<byte[]> generateDocumentsArchive(@RequestBody(required = false) BankruptcyApplicationData request) throws IOException {
+        BankruptcyApplicationData data = normalizeData(request);
+        Debtor debtor = data.debtor();
+        List<Creditor> creditors = data.creditors();
+        List<RealEstateItem> realEstateItems = data.propertyInfo().realEstateItems();
+        List<Vehicle> vehicles = data.propertyInfo().vehicles();
         List<BankAccount> bankAccounts = List.of();
 
         byte[] statementDocx = generateStatementDocx();
@@ -97,31 +74,10 @@ public class DocumentGenerationController {
     }
 
     @PostMapping(value = "/generate/appendix-1", produces = "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
-    public ResponseEntity<byte[]> generateAppendixOne() throws IOException {
-        Debtor debtor = new Debtor(
-                "Иванов Иван Иванович",
-                LocalDate.of(1989, 3, 14),
-                "112-233-445 95",
-                "770123456789",
-                "4510 123456",
-                new Address("Россия", "г. Москва", "Москва", "Тверская", "10", "15", "125009"),
-                new Address("Россия", "г. Москва", "Москва", "Тверская", "10", "15", "125009"),
-                "79161234567",
-                "ivanov@example.com",
-                "г. Москва"
-        );
-        List<Creditor> creditors = List.of(
-                new Creditor(
-                        "Банк А",
-                        "7700000000",
-                        List.of(new Contract("Кредитный договор № 1 от 10.01.2024", "loan", new BigDecimal("150000.00"), BigDecimal.ZERO, BigDecimal.ZERO))
-                ),
-                new Creditor(
-                        "МФО Б",
-                        "7800000000",
-                        List.of(new Contract("Договор займа № 77 от 03.02.2025", "microloan", new BigDecimal("25000.00"), BigDecimal.ZERO, BigDecimal.ZERO))
-                )
-        );
+    public ResponseEntity<byte[]> generateAppendixOne(@RequestBody(required = false) BankruptcyApplicationData request) throws IOException {
+        BankruptcyApplicationData data = normalizeData(request);
+        Debtor debtor = data.debtor();
+        List<Creditor> creditors = data.creditors();
         byte[] generated = generateAppendixOneDocx(debtor, creditors);
 
         HttpHeaders headers = new HttpHeaders();
@@ -132,26 +88,11 @@ public class DocumentGenerationController {
     }
 
     @PostMapping(value = "/generate/appendix-2", produces = "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
-    public ResponseEntity<byte[]> generatePropertyInventory() throws IOException {
-        Debtor debtor = new Debtor(
-                "Иванов Иван Иванович",
-                LocalDate.of(1989, 3, 14),
-                "112-233-445 95",
-                "770123456789",
-                "4510 123456",
-                new Address("Россия", "г. Москва", "Москва", "Тверская", "10", "15", "125009"),
-                new Address("Россия", "г. Москва", "Москва", "Тверская", "10", "15", "125009"),
-                "79161234567",
-                "ivanov@example.com",
-                "г. Москва"
-        );
-
-        List<RealEstateItem> realEstateItems = List.of(
-                new RealEstateItem("квартира", debtor.registrationAddress(), 62.4, "Собственность")
-        );
-        List<Vehicle> vehicles = List.of(
-                new Vehicle("легковой автомобиль", "Hyundai", "Solaris", "X7LBR32AAB1234567", 2017)
-        );
+    public ResponseEntity<byte[]> generatePropertyInventory(@RequestBody(required = false) BankruptcyApplicationData request) throws IOException {
+        BankruptcyApplicationData data = normalizeData(request);
+        Debtor debtor = data.debtor();
+        List<RealEstateItem> realEstateItems = data.propertyInfo().realEstateItems();
+        List<Vehicle> vehicles = data.propertyInfo().vehicles();
         List<BankAccount> bankAccounts = List.of();
 
         byte[] generated = generateAppendixTwoDocx(debtor, realEstateItems, vehicles, bankAccounts);
@@ -177,6 +118,7 @@ public class DocumentGenerationController {
         try (InputStream inputStream = template.getInputStream();
              XWPFDocument document = new XWPFDocument(inputStream);
              ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            requireTableIndex(document, 1, "Приложение №1");
             fillDebtorInfo(document, debtor);
             fillCreditorsTable(document, creditors);
             document.write(out);
@@ -190,6 +132,7 @@ public class DocumentGenerationController {
         try (InputStream inputStream = template.getInputStream();
              XWPFDocument document = new XWPFDocument(inputStream);
              ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            requireTableIndex(document, 3, "Приложение №2");
             fillDebtorInfo(document, debtor);
             fillRealEstateTable(document.getTables().get(1), realEstateItems);
             fillVehicleTable(document.getTables().get(2), vehicles, debtor.registrationAddress());
@@ -223,6 +166,7 @@ public class DocumentGenerationController {
 
     private void fillDebtorInfo(XWPFDocument document, Debtor debtor) {
         XWPFTable debtorTable = document.getTables().get(0);
+        requireRowIndex(debtorTable, 20, "Блок сведений о гражданине");
         String[] fioParts = splitFio(debtor.fullName());
 
         setCellText(debtorTable.getRow(1).getCell(2), fioParts[0]);
@@ -249,6 +193,7 @@ public class DocumentGenerationController {
 
     private void fillCreditorsTable(XWPFDocument document, List<Creditor> creditors) {
         XWPFTable table = document.getTables().get(1);
+        requireRowIndex(table, 4, "Таблица кредиторов");
         List<CreditorContractRow> rows = flattenContracts(creditors);
 
         for (int rowIdx = 4; rowIdx < table.getNumberOfRows(); rowIdx++) {
@@ -287,8 +232,8 @@ public class DocumentGenerationController {
                         creditor.name(),
                         creditorAddress(creditor.name()),
                         contract.contractNumber(),
-                        debtCalculationService.formatAmountRu(contract.principalDebt()),
-                        debtCalculationService.formatAmountRu(contract.principalDebt()),
+                        debtCalculationService.formatAmountRu(totalDebtByContract(contract)),
+                        debtCalculationService.formatAmountRu(principalAndInterest(contract)),
                         penalties
                 ));
             }
@@ -332,6 +277,7 @@ public class DocumentGenerationController {
     }
 
     private void fillRealEstateTable(XWPFTable table, List<RealEstateItem> items) {
+        requireRowIndex(table, 10, "Таблица недвижимости");
         fillRealEstateCategoryRow(table, 2, "земел", items);
         fillRealEstateCategoryRow(table, 4, "дом", items, "дач");
         fillRealEstateCategoryRow(table, 6, "квартир", items);
@@ -366,6 +312,7 @@ public class DocumentGenerationController {
     }
 
     private void fillVehicleTable(XWPFTable table, List<Vehicle> vehicles, Address storageAddress) {
+        requireRowIndex(table, 15, "Таблица транспортных средств");
         fillVehicleCategoryRow(table, 2, "легк", vehicles, storageAddress);
         fillVehicleCategoryRow(table, 4, "груз", vehicles, storageAddress);
         fillVehicleCategoryRow(table, 6, "мото", vehicles, storageAddress);
@@ -412,6 +359,7 @@ public class DocumentGenerationController {
     }
 
     private void fillBankAccountsTable(XWPFTable table, List<BankAccount> bankAccounts) {
+        requireRowIndex(table, 6, "Таблица банковских счетов");
         for (int rowIndex = 2; rowIndex <= 6; rowIndex++) {
             XWPFTableRow row = table.getRow(rowIndex);
             BankAccount account = rowIndex - 2 < bankAccounts.size() ? bankAccounts.get(rowIndex - 2) : null;
@@ -421,6 +369,94 @@ public class DocumentGenerationController {
             setCellText(row.getCell(3), account == null || account.openDate() == null ? DASH : account.openDate().format(DATE_FORMATTER));
             setCellText(row.getCell(4), account == null ? DASH : safe(account.balanceRubles()));
         }
+    }
+
+    private BigDecimal totalDebtByContract(Contract contract) {
+        if (contract == null) {
+            return BigDecimal.ZERO;
+        }
+        return safeMoney(contract.principalDebt())
+                .add(safeMoney(contract.interestDebt()))
+                .add(safeMoney(contract.penalties()));
+    }
+
+    private BigDecimal principalAndInterest(Contract contract) {
+        if (contract == null) {
+            return BigDecimal.ZERO;
+        }
+        return safeMoney(contract.principalDebt())
+                .add(safeMoney(contract.interestDebt()));
+    }
+
+    private BigDecimal safeMoney(BigDecimal value) {
+        return value == null ? BigDecimal.ZERO : value;
+    }
+
+    private void requireTableIndex(XWPFDocument document, int requiredIndex, String templateName) {
+        if (document.getTables().size() <= requiredIndex) {
+            throw new IllegalStateException(templateName + ": ожидается таблица с индексом " + requiredIndex + ", фактически " + document.getTables().size());
+        }
+    }
+
+    private void requireRowIndex(XWPFTable table, int requiredIndex, String blockName) {
+        if (table.getNumberOfRows() <= requiredIndex) {
+            throw new IllegalStateException(blockName + ": ожидается строка с индексом " + requiredIndex + ", фактически " + table.getNumberOfRows());
+        }
+    }
+
+    private BankruptcyApplicationData normalizeData(BankruptcyApplicationData request) {
+        BankruptcyApplicationData defaults = defaultData();
+        if (request == null) {
+            return defaults;
+        }
+
+        Debtor debtor = request.debtor() == null ? defaults.debtor() : request.debtor();
+        List<Creditor> creditors = (request.creditors() == null || request.creditors().isEmpty()) ? defaults.creditors() : request.creditors();
+        PropertyInfo propertyInfo = request.propertyInfo() == null ? defaults.propertyInfo() : request.propertyInfo();
+        EmploymentInfo employmentInfo = request.employmentInfo() == null ? defaults.employmentInfo() : request.employmentInfo();
+
+        List<Vehicle> vehicles = propertyInfo.vehicles() == null ? List.of() : propertyInfo.vehicles();
+        List<RealEstateItem> realEstateItems = propertyInfo.realEstateItems() == null ? List.of() : propertyInfo.realEstateItems();
+        PropertyInfo normalizedPropertyInfo = new PropertyInfo(vehicles, realEstateItems, propertyInfo.hasOtherValuableProperty());
+
+        return new BankruptcyApplicationData(debtor, creditors, request.familyInfo(), employmentInfo, normalizedPropertyInfo);
+    }
+
+    private BankruptcyApplicationData defaultData() {
+        Debtor debtor = new Debtor(
+                "Иванов Иван Иванович",
+                LocalDate.of(1989, 3, 14),
+                "112-233-445 95",
+                "770123456789",
+                "4510 123456",
+                new Address("Россия", "г. Москва", "Москва", "Тверская", "10", "15", "125009"),
+                new Address("Россия", "г. Москва", "Москва", "Тверская", "10", "15", "125009"),
+                "79161234567",
+                "ivanov@example.com",
+                "г. Москва"
+        );
+
+        List<Creditor> creditors = List.of(
+                new Creditor(
+                        "Банк А",
+                        "7700000000",
+                        List.of(new Contract("Кредитный договор № 1 от 10.01.2024", "loan", new BigDecimal("150000.00"), BigDecimal.ZERO, BigDecimal.ZERO))
+                ),
+                new Creditor(
+                        "МФО Б",
+                        "7800000000",
+                        List.of(new Contract("Договор займа № 77 от 03.02.2025", "microloan", new BigDecimal("25000.00"), BigDecimal.ZERO, BigDecimal.ZERO))
+                )
+        );
+
+        PropertyInfo propertyInfo = new PropertyInfo(
+                List.of(new Vehicle("легковой автомобиль", "Hyundai", "Solaris", "X7LBR32AAB1234567", 2017)),
+                List.of(new RealEstateItem("квартира", debtor.registrationAddress(), 62.4, "Собственность")),
+                false
+        );
+
+        EmploymentInfo employmentInfo = new EmploymentInfo("EMPLOYED", "ООО Пример", "Специалист", new BigDecimal("80000"));
+        return new BankruptcyApplicationData(debtor, creditors, null, employmentInfo, propertyInfo);
     }
 
     private String formatAddress(Address address) {

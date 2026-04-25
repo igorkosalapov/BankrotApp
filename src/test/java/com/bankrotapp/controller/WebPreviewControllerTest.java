@@ -226,4 +226,16 @@ class WebPreviewControllerTest {
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("Работаю по трудовому договору, доход нестабилен.")))
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("Заемные средства использованы на базовые бытовые расходы.")));
     }
+
+    @Test
+    void shouldRenderUnemployedStatusBlock() throws Exception {
+        mockMvc.perform(post("/preview")
+                        .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                        .param("fullName", "Иванов Иван Иванович")
+                        .param("creditorLines", "Банк А|Договор|1000")
+                        .param("employmentStatus", "UNEMPLOYED"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("Блок занятости")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("Официального места работы не имеет.")));
+    }
 }
