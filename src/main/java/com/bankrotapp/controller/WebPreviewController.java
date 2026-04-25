@@ -100,25 +100,27 @@ public class WebPreviewController {
                 .append(escape(fullName))
                 .append("</p></section>");
 
-        html.append("<section><h2>Кредиторы и договоры</h2>");
+        html.append("<section><h2>Шапка заявления</h2>");
+        if (creditors.isEmpty()) {
+            html.append("<p>Кредиторы не указаны.</p>");
+        } else {
+            for (int i = 0; i < creditors.size(); i++) {
+                Creditor creditor = creditors.get(i);
+                html.append("<p><strong>Кредитор ")
+                        .append(i + 1)
+                        .append(":</strong> ")
+                        .append(escape(creditor.name()))
+                        .append("</p>");
+            }
+        }
+        html.append("</section>");
+
+        html.append("<section><h2>Текст заявления: задолженность по кредиторам</h2>");
         if (creditors.isEmpty()) {
             html.append("<p>Кредиторы не указаны.</p>");
         } else {
             for (Creditor creditor : creditors) {
-                BigDecimal creditorTotal = debtCalculationService.calculateCreditorTotal(creditor);
-                html.append("<h3>").append(escape(creditor.name())).append("</h3>");
-                html.append("<ul>");
-                for (Contract contract : creditor.contracts()) {
-                    html.append("<li>")
-                            .append(escape(contract.contractNumber()))
-                            .append(" — ")
-                            .append(debtCalculationService.formatAmountRu(contract.principalDebt()))
-                            .append(" ₽</li>");
-                }
-                html.append("</ul>");
-                html.append("<p><strong>Сумма по кредитору:</strong> ")
-                        .append(debtCalculationService.formatAmountRu(creditorTotal))
-                        .append(" ₽</p>");
+                appendCreditorDebtBlock(html, creditor);
             }
         }
         html.append("<p><strong>Общая сумма долга:</strong> ")
@@ -189,5 +191,48 @@ public class WebPreviewController {
                 .replace("&", "&amp;")
                 .replace("<", "&lt;")
                 .replace(">", "&gt;");
+    }
+
+    private void appendCreditorDebtBlock(StringBuilder html, Creditor creditor) {
+        List<Contract> contracts = creditor.contracts();
+        BigDecimal creditorTotal = debtCalculationService.calculateCreditorTotal(creditor);
+
+        html.append("<article>");
+        html.append("<h3>Задолженность перед ")
+                .append(escape(creditor.name()));
+
+        if (contracts.size() > 1) {
+            html.append(" (общая сумма: ")
+                    .append(debtCalculationService.formatAmountRu(creditorTotal))
+                    .append(" ₽)");
+        }
+        html.append("</h3>");
+
+        if (contracts.isEmpty()) {
+            html.append("<p>Договоры не указаны.</p>");
+        } else if (contracts.size() == 1) {
+            Contract contract = contracts.get(0);
+            html.append("<p><strong>Основание возникновения задолженности:</strong> ")
+                    .append(escape(contract.contractNumber()))
+                    .append("</p>");
+            html.append("<p><strong>Подтверждающий документ:</strong> ")
+                    .append(escape(contract.contractNumber()))
+                    .append("</p>");
+            html.append("<p><strong>Сумма долга:</strong> ")
+                    .append(debtCalculationService.formatAmountRu(contract.principalDebt()))
+                    .append(" ₽</p>");
+        } else {
+            html.append("<ul>");
+            for (Contract contract : contracts) {
+                html.append("<li>")
+                        .append(escape(contract.contractNumber()))
+                        .append(" — ")
+                        .append(debtCalculationService.formatAmountRu(contract.principalDebt()))
+                        .append(" ₽</li>");
+            }
+            html.append("</ul>");
+        }
+
+        html.append("</article>");
     }
 }
