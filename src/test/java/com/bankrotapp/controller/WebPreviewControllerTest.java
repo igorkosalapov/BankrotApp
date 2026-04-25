@@ -23,7 +23,8 @@ class WebPreviewControllerTest {
     void shouldRenderInputForm() throws Exception {
         mockMvc.perform(get("/"))
                 .andExpect(status().isOk())
-                .andExpect(content().string(org.hamcrest.Matchers.containsString("<form action=\"/preview\" method=\"post\">")));
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("<form action=\"/preview\" method=\"post\">")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("Вспомогательные текстовые блоки (OpenAI только для этих полей)")));
     }
 
     @Test
@@ -195,5 +196,34 @@ class WebPreviewControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("Транспортные средства:")))
                 .andExpect(content().string(org.hamcrest.Matchers.containsString("Легковой автомобиль Hyundai Solaris, гос. номер: А111АА77, год выпуска: 2017")));
+    }
+
+    @Test
+    void shouldRenderAuxiliaryBlocksWithDefaultsWhenOpenAiUnavailable() throws Exception {
+        mockMvc.perform(post("/preview")
+                        .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                        .param("fullName", "Иванов Иван Иванович")
+                        .param("creditorLines", "Банк А|Договор|1000"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("Вспомогательные блоки перед генерацией DOCX")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("Пользовательский/стандартный fallback")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("Причина тяжелого финансового положения")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("Описание работы/доходов")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("На что были потрачены заемные средства")));
+    }
+
+    @Test
+    void shouldUseUserTextAsFallbackWhenProvided() throws Exception {
+        mockMvc.perform(post("/preview")
+                        .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                        .param("fullName", "Иванов Иван Иванович")
+                        .param("creditorLines", "Банк А|Договор|1000")
+                        .param("hardshipReasonInput", "Потеря части дохода после сокращения премий.")
+                        .param("employmentIncomeInput", "Работаю по трудовому договору, доход нестабилен.")
+                        .param("loanFundsUsageInput", "Заемные средства использованы на базовые бытовые расходы."))
+                .andExpect(status().isOk())
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("Потеря части дохода после сокращения премий.")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("Работаю по трудовому договору, доход нестабилен.")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("Заемные средства использованы на базовые бытовые расходы.")));
     }
 }
