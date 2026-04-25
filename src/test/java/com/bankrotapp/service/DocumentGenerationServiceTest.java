@@ -21,6 +21,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
@@ -40,22 +41,23 @@ class DocumentGenerationServiceTest {
     void testGeneratedStatementForIvanovDoesNotContainTemplateDebtorData() throws Exception {
         String text = extract(service.generateStatementDocx(ivanovClient()));
 
-        assertTrue(text.contains("Иванов Сергей Николаевич"));
-        assertFalse(text.contains("Захаров"));
-        assertFalse(text.contains("ВЭББАНКИР"));
-        assertFalse(text.contains("ТУРБОЗАЙМ"));
-        assertFalse(text.contains("МИГКРЕДИТ"));
-        assertFalse(text.contains("MITSUBISHI RVR"));
+        assertContainsWithPreview(text, "Иванов Сергей Николаевич");
+        assertNotContainsWithPreview(text, "Захаров");
+        assertNotContainsWithPreview(text, "ВЭББАНКИР");
+        assertNotContainsWithPreview(text, "ТУРБОЗАЙМ");
+        assertNotContainsWithPreview(text, "МИГКРЕДИТ");
+        assertNotContainsWithPreview(text, "MITSUBISHI RVR");
     }
 
     @Test
     void testGeneratedStatementContainsCurrentCreditorsAndTotalDebt() throws Exception {
         String text = extract(service.generateStatementDocx(ivanovClient()));
 
-        assertTrue(text.contains("АО Альфа-Банк"));
-        assertTrue(text.contains("ООО МКК Срочноденьги"));
-        assertTrue(text.contains("ООО ПКО Право Онлайн"));
-        assertTrue(text.contains("375 000,00") || text.contains("375\u00A0000,00"));
+        assertContainsWithPreview(text, "АО Альфа-Банк");
+        assertContainsWithPreview(text, "ООО МКК Срочноденьги");
+        assertContainsWithPreview(text, "ООО ПКО Право Онлайн");
+        assertTrue(text.contains("375 000,00") || text.contains("375\u00A0000,00"),
+                "Ожидалась сумма 375 000,00. Фрагмент заявления:\n" + preview(text));
     }
 
     @Test
@@ -97,6 +99,27 @@ class DocumentGenerationServiceTest {
             assertFalse(xml.contains("{{"), "В DOCX остались неразрешённые placeholders {{...}}.");
             assertFalse(xml.contains("}}"), "В DOCX остались неразрешённые placeholders {{...}}.");
         }
+    }
+
+    @Test
+    void testGeneratedZipForIvanovDoesNotContainOldStatementData() throws Exception {
+        byte[] zip = service.generateZip(ivanovClient());
+        byte[] statementDocx = readStatementDocx(zip);
+        String text = extract(statementDocx);
+
+        assertContainsWithPreview(text, "Иванов Сергей Николаевич");
+        assertContainsWithPreview(text, "АО Альфа-Банк");
+        assertContainsWithPreview(text, "ООО МКК Срочноденьги");
+        assertContainsWithPreview(text, "ООО ПКО Право Онлайн");
+        assertTrue(text.contains("375 000,00") || text.contains("375\u00A0000,00"),
+                "Ожидалась сумма 375 000,00 в заявлении из ZIP. Фрагмент:\n" + preview(text));
+
+        assertNotContainsWithPreview(text, "Захаров");
+        assertNotContainsWithPreview(text, "ВЭББАНКИР");
+        assertNotContainsWithPreview(text, "ТУРБОЗАЙМ");
+        assertNotContainsWithPreview(text, "МИГКРЕДИТ");
+        assertNotContainsWithPreview(text, "MITSUBISHI RVR");
+        assertNotContainsWithPreview(text, "1 248 887,93");
     }
 
     private BankruptcyApplicationData ivanovClient() {
@@ -181,5 +204,32 @@ class DocumentGenerationServiceTest {
             }
         }
         return xml.toString();
+    }
+
+    private byte[] readStatementDocx(byte[] zipBytes) throws IOException {
+        try (ZipInputStream zipInputStream = new ZipInputStream(new ByteArrayInputStream(zipBytes), StandardCharsets.UTF_8)) {
+            ZipEntry entry;
+            while ((entry = zipInputStream.getNextEntry()) != null) {
+                if (!entry.isDirectory()
+                        && entry.getName().endsWith(".docx")
+                        && entry.getName().contains("Заявление_о_банкротстве_")) {
+                    return zipInputStream.readAllBytes();
+                }
+            }
+        }
+        throw new AssertionError("В ZIP не найден файл основного заявления.");
+    }
+
+    private void assertContainsWithPreview(String text, String expected) {
+        assertTrue(text.contains(expected), "Ожидалось вхождение: " + expected + ". Фрагмент заявления:\n" + preview(text));
+    }
+
+    private void assertNotContainsWithPreview(String text, String unexpected) {
+        assertFalse(text.contains(unexpected), "Не ожидалось вхождение: " + unexpected + ". Фрагмент заявления:\n" + preview(text));
+    }
+
+    private String preview(String text) {
+        int limit = Math.min(3000, Objects.requireNonNullElse(text, "").length());
+        return Objects.requireNonNullElse(text, "").substring(0, limit);
     }
 }
