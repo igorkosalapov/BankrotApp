@@ -31,6 +31,8 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 @RestController
 public class DocumentGenerationController {
@@ -44,8 +46,8 @@ public class DocumentGenerationController {
         this.debtCalculationService = debtCalculationService;
     }
 
-    @PostMapping(value = "/generate", produces = "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
-    public ResponseEntity<byte[]> generateStatement() throws IOException {
+    @PostMapping(value = "/generate", produces = "application/zip")
+    public ResponseEntity<byte[]> generateDocumentsArchive() throws IOException {
         Debtor debtor = new Debtor(
                 "Иванов Иван Иванович",
                 LocalDate.of(1989, 3, 14),
@@ -72,27 +74,61 @@ public class DocumentGenerationController {
                 )
         );
 
-        ClassPathResource template = new ClassPathResource("templates/Prilozhenie_1.docx");
-        byte[] generated;
+        List<RealEstateItem> realEstateItems = List.of(
+                new RealEstateItem("квартира", debtor.registrationAddress(), 62.4, "Собственность")
+        );
+        List<Vehicle> vehicles = List.of(
+                new Vehicle("легковой автомобиль", "Hyundai", "Solaris", "X7LBR32AAB1234567", 2017)
+        );
+        List<BankAccount> bankAccounts = List.of();
 
-        try (InputStream inputStream = template.getInputStream();
-             XWPFDocument document = new XWPFDocument(inputStream)) {
-            fillDebtorInfo(document, debtor);
-            fillCreditorsTable(document, creditors);
-
-            try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
-                document.write(out);
-                generated = out.toByteArray();
-            }
-        }
+        byte[] statementDocx = generateStatementDocx();
+        byte[] appendixOneDocx = generateAppendixOneDocx(debtor, creditors);
+        byte[] appendixTwoDocx = generateAppendixTwoDocx(debtor, realEstateItems, vehicles, bankAccounts);
+        byte[] zip = zipDocuments(debtor.fullName(), statementDocx, appendixOneDocx, appendixTwoDocx);
 
         HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.wordprocessingml.document"));
-        headers.setContentDisposition(ContentDisposition.attachment().filename("prilozhenie-1.docx").build());
+        headers.setContentType(MediaType.parseMediaType("application/zip"));
+        headers.setContentDisposition(ContentDisposition.attachment().filename("dokumenty-" + sanitizeFileName(debtor.fullName()) + ".zip").build());
 
         return ResponseEntity.ok()
                 .headers(headers)
-                .body(generated);
+                .body(zip);
+    }
+
+    @PostMapping(value = "/generate/appendix-1", produces = "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+    public ResponseEntity<byte[]> generateAppendixOne() throws IOException {
+        Debtor debtor = new Debtor(
+                "Иванов Иван Иванович",
+                LocalDate.of(1989, 3, 14),
+                "112-233-445 95",
+                "770123456789",
+                "4510 123456",
+                new Address("Россия", "г. Москва", "Москва", "Тверская", "10", "15", "125009"),
+                new Address("Россия", "г. Москва", "Москва", "Тверская", "10", "15", "125009"),
+                "79161234567",
+                "ivanov@example.com",
+                "г. Москва"
+        );
+        List<Creditor> creditors = List.of(
+                new Creditor(
+                        "Банк А",
+                        "7700000000",
+                        List.of(new Contract("Кредитный договор № 1 от 10.01.2024", "loan", new BigDecimal("150000.00"), BigDecimal.ZERO, BigDecimal.ZERO))
+                ),
+                new Creditor(
+                        "МФО Б",
+                        "7800000000",
+                        List.of(new Contract("Договор займа № 77 от 03.02.2025", "microloan", new BigDecimal("25000.00"), BigDecimal.ZERO, BigDecimal.ZERO))
+                )
+        );
+        byte[] generated = generateAppendixOneDocx(debtor, creditors);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.wordprocessingml.document"));
+        headers.setContentDisposition(ContentDisposition.attachment().filename("prilozhenie-1-" + sanitizeFileName(debtor.fullName()) + ".docx").build());
+
+        return ResponseEntity.ok().headers(headers).body(generated);
     }
 
     @PostMapping(value = "/generate/appendix-2", produces = "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
@@ -118,29 +154,71 @@ public class DocumentGenerationController {
         );
         List<BankAccount> bankAccounts = List.of();
 
-        ClassPathResource template = new ClassPathResource("templates/Prilozhenie_2.docx");
-        byte[] generated;
-
-        try (InputStream inputStream = template.getInputStream();
-             XWPFDocument document = new XWPFDocument(inputStream)) {
-            fillDebtorInfo(document, debtor);
-            fillRealEstateTable(document.getTables().get(1), realEstateItems);
-            fillVehicleTable(document.getTables().get(2), vehicles, debtor.registrationAddress());
-            fillBankAccountsTable(document.getTables().get(3), bankAccounts);
-
-            try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
-                document.write(out);
-                generated = out.toByteArray();
-            }
-        }
+        byte[] generated = generateAppendixTwoDocx(debtor, realEstateItems, vehicles, bankAccounts);
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.wordprocessingml.document"));
-        headers.setContentDisposition(ContentDisposition.attachment().filename("prilozhenie-2.docx").build());
+        headers.setContentDisposition(ContentDisposition.attachment().filename("prilozhenie-2-" + sanitizeFileName(debtor.fullName()) + ".docx").build());
 
         return ResponseEntity.ok()
                 .headers(headers)
                 .body(generated);
+    }
+
+    private byte[] generateStatementDocx() throws IOException {
+        ClassPathResource template = new ClassPathResource("templates/Zayavlenie_na_bankrotstvo_fiz_litsa_s_pometkami.docx");
+        try (InputStream inputStream = template.getInputStream()) {
+            return inputStream.readAllBytes();
+        }
+    }
+
+    private byte[] generateAppendixOneDocx(Debtor debtor, List<Creditor> creditors) throws IOException {
+        ClassPathResource template = new ClassPathResource("templates/Prilozhenie_1.docx");
+        try (InputStream inputStream = template.getInputStream();
+             XWPFDocument document = new XWPFDocument(inputStream);
+             ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            fillDebtorInfo(document, debtor);
+            fillCreditorsTable(document, creditors);
+            document.write(out);
+            return out.toByteArray();
+        }
+    }
+
+    private byte[] generateAppendixTwoDocx(Debtor debtor, List<RealEstateItem> realEstateItems, List<Vehicle> vehicles,
+                                           List<BankAccount> bankAccounts) throws IOException {
+        ClassPathResource template = new ClassPathResource("templates/Prilozhenie_2.docx");
+        try (InputStream inputStream = template.getInputStream();
+             XWPFDocument document = new XWPFDocument(inputStream);
+             ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            fillDebtorInfo(document, debtor);
+            fillRealEstateTable(document.getTables().get(1), realEstateItems);
+            fillVehicleTable(document.getTables().get(2), vehicles, debtor.registrationAddress());
+            fillBankAccountsTable(document.getTables().get(3), bankAccounts);
+            document.write(out);
+            return out.toByteArray();
+        }
+    }
+
+    private byte[] zipDocuments(String debtorFullName, byte[] statementDocx, byte[] appendixOneDocx, byte[] appendixTwoDocx) throws IOException {
+        String fio = sanitizeFileName(debtorFullName);
+        try (ByteArrayOutputStream out = new ByteArrayOutputStream();
+             ZipOutputStream zipOutputStream = new ZipOutputStream(out)) {
+            addZipEntry(zipOutputStream, "Zayavlenie_" + fio + ".docx", statementDocx);
+            addZipEntry(zipOutputStream, "Prilozhenie_1_" + fio + ".docx", appendixOneDocx);
+            addZipEntry(zipOutputStream, "Prilozhenie_2_" + fio + ".docx", appendixTwoDocx);
+            zipOutputStream.finish();
+            return out.toByteArray();
+        }
+    }
+
+    private void addZipEntry(ZipOutputStream zipOutputStream, String fileName, byte[] fileBytes) throws IOException {
+        zipOutputStream.putNextEntry(new ZipEntry(fileName));
+        zipOutputStream.write(fileBytes);
+        zipOutputStream.closeEntry();
+    }
+
+    private String sanitizeFileName(String value) {
+        return safe(value).replaceAll("[\\\\/:*?\"<>|]", "_").replace(' ', '_');
     }
 
     private void fillDebtorInfo(XWPFDocument document, Debtor debtor) {
