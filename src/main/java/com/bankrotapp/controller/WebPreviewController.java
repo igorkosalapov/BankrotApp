@@ -2,6 +2,8 @@ package com.bankrotapp.controller;
 
 import com.bankrotapp.model.Contract;
 import com.bankrotapp.model.Creditor;
+import com.bankrotapp.openai.OpenAiTextBlockService;
+import com.bankrotapp.openai.OpenAiTextBlocks;
 import com.bankrotapp.service.DebtCalculationService;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Controller;
@@ -25,9 +27,12 @@ public class WebPreviewController {
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("dd.MM.yyyy");
 
     private final DebtCalculationService debtCalculationService;
+    private final OpenAiTextBlockService openAiTextBlockService;
 
-    public WebPreviewController(DebtCalculationService debtCalculationService) {
+    public WebPreviewController(DebtCalculationService debtCalculationService,
+                                OpenAiTextBlockService openAiTextBlockService) {
         this.debtCalculationService = debtCalculationService;
+        this.openAiTextBlockService = openAiTextBlockService;
     }
 
     @GetMapping(value = "/", produces = MediaType.TEXT_HTML_VALUE)
@@ -93,6 +98,16 @@ public class WebPreviewController {
                         <label for="vehicleLines">Транспорт (тип|марка|модель|госномер|год)</label>
                         <textarea id="vehicleLines" name="vehicleLines" placeholder="Легковой автомобиль|Hyundai|Solaris|А111АА77|2017"></textarea>
 
+                        <h2>Вспомогательные текстовые блоки (OpenAI только для этих полей)</h2>
+                        <label for="hardshipReasonInput">Причина тяжелого финансового положения</label>
+                        <textarea id="hardshipReasonInput" name="hardshipReasonInput" placeholder="Например: после сокращения дохода и роста обязательных платежей стало невозможно исполнять обязательства в полном объеме."></textarea>
+
+                        <label for="employmentIncomeInput">Описание работы/доходов</label>
+                        <textarea id="employmentIncomeInput" name="employmentIncomeInput" placeholder="Например: официально трудоустроен, получает ежемесячный доход, которого недостаточно для полного обслуживания долгов."></textarea>
+
+                        <label for="loanFundsUsageInput">Описание использования заемных средств</label>
+                        <textarea id="loanFundsUsageInput" name="loanFundsUsageInput" placeholder="Например: средства использованы на повседневные расходы семьи и исполнение первоочередных обязательств."></textarea>
+
                         <button type="submit">Показать предпросмотр</button>
                     </form>
                 </body>
@@ -114,13 +129,21 @@ public class WebPreviewController {
                               @RequestParam(required = false, defaultValue = "") String deathCertificate,
                               @RequestParam(required = false, defaultValue = "") String childrenLines,
                               @RequestParam(required = false, defaultValue = "") String realEstateLines,
-                              @RequestParam(required = false, defaultValue = "") String vehicleLines) {
+                              @RequestParam(required = false, defaultValue = "") String vehicleLines,
+                              @RequestParam(required = false, defaultValue = "") String hardshipReasonInput,
+                              @RequestParam(required = false, defaultValue = "") String employmentIncomeInput,
+                              @RequestParam(required = false, defaultValue = "") String loanFundsUsageInput) {
 
         List<Creditor> creditors = parseCreditors(creditorLines);
         BigDecimal totalDebt = debtCalculationService.calculateTotalDebt(creditors);
         String familyBlock = buildFamilyBlock(maritalStatus, spouseName, marriageDate, marriageCertificate,
                 divorceDate, divorceCertificate, spouseDeathDate, deathCertificate, childrenLines);
         String propertyBlock = buildPropertyBlock(realEstateLines, vehicleLines);
+        OpenAiTextBlocks auxiliaryTextBlocks = openAiTextBlockService.generateAuxiliaryBlocks(
+                hardshipReasonInput,
+                employmentIncomeInput,
+                loanFundsUsageInput
+        );
 
         StringBuilder html = new StringBuilder();
         html.append("""
@@ -179,6 +202,21 @@ public class WebPreviewController {
         html.append("<section><h2>Блок имущества</h2><pre>")
                 .append(escape(propertyBlock.isBlank() ? "Нет данных" : propertyBlock))
                 .append("</pre></section>");
+
+        html.append("<section><h2>Вспомогательные блоки перед генерацией DOCX</h2>")
+                .append("<p><strong>Источник:</strong> ")
+                .append(auxiliaryTextBlocks.generatedByOpenAi() ? "OpenAI API" : "Пользовательский/стандартный fallback")
+                .append("</p>")
+                .append("<p><strong>Причина тяжелого финансового положения:</strong> ")
+                .append(escape(auxiliaryTextBlocks.hardshipReason()))
+                .append("</p>")
+                .append("<p><strong>Описание работы/доходов:</strong> ")
+                .append(escape(auxiliaryTextBlocks.employmentIncomeDescription()))
+                .append("</p>")
+                .append("<p><strong>На что были потрачены заемные средства:</strong> ")
+                .append(escape(auxiliaryTextBlocks.loanFundsUsageDescription()))
+                .append("</p>")
+                .append("</section>");
 
         html.append("<p><a href='/'>← Назад к форме</a></p>")
                 .append("</body></html>");
