@@ -3,6 +3,7 @@ package com.bankrotapp.controller;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.http.MediaType;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -28,6 +29,7 @@ class WebPreviewControllerTest {
     @Test
     void shouldRenderPreviewWithCalculatedTotals() throws Exception {
         mockMvc.perform(post("/preview")
+                        .contentType(MediaType.APPLICATION_FORM_URLENCODED)
                         .param("fullName", "Иванов Иван Иванович")
                         .param("creditorLines",
                                 "Банк А|Договор 1|1000\nБанк А|Договор 2|250,50\nМФО Б|Договор 3|149.50")
