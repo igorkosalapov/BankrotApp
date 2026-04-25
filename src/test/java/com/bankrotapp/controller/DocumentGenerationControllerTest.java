@@ -58,4 +58,45 @@ class DocumentGenerationControllerTest {
                 () -> assertTrue(text.contains("МФО Б"), "Таблица кредиторов должна содержать второго кредитора.")
         );
     }
+
+    @Test
+    void shouldGenerateAppendixTwoDocxWithoutUnresolvedPlaceholders() throws Exception {
+        MvcResult result = mockMvc.perform(post("/generate/appendix-2"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Content-Type", containsString("application/vnd.openxmlformats-officedocument.wordprocessingml.document")))
+                .andReturn();
+
+        byte[] docxBytes = result.getResponse().getContentAsByteArray();
+        String text;
+        String surnameInCitizenBlock;
+        String apartmentAddress;
+        String passengerCarBlock;
+        String bankCellValue;
+
+        try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(docxBytes));
+             XWPFWordExtractor extractor = new XWPFWordExtractor(document)) {
+            text = extractor.getText();
+
+            XWPFTable citizenTable = document.getTables().get(0);
+            surnameInCitizenBlock = citizenTable.getRow(1).getCell(2).getText().trim();
+
+            XWPFTable realEstateTable = document.getTables().get(1);
+            apartmentAddress = realEstateTable.getRow(6).getCell(3).getText().trim();
+
+            XWPFTable vehicleTable = document.getTables().get(2);
+            passengerCarBlock = vehicleTable.getRow(2).getCell(1).getText().trim();
+
+            XWPFTable bankAccountsTable = document.getTables().get(3);
+            bankCellValue = bankAccountsTable.getRow(2).getCell(1).getText().trim();
+        }
+
+        assertAll(
+                () -> assertFalse(PLACEHOLDER_PATTERN.matcher(text).find(), "В сгенерированном документе остались placeholder-ы {{...}}."),
+                () -> assertTrue(text.contains("Опись имущества гражданина"), "Документ должен быть на основе Приложения №2."),
+                () -> assertEquals("Иванов", surnameInCitizenBlock, "Фамилия в блоке гражданина должна быть заменена данными должника."),
+                () -> assertTrue(apartmentAddress.contains("г. Москва"), "Категория квартир должна быть заполнена адресом."),
+                () -> assertTrue(passengerCarBlock.contains("Hyundai Solaris 2017"), "Категория легковых автомобилей должна быть заполнена транспортом."),
+                () -> assertEquals("-", bankCellValue, "При отсутствии банковских счетов должны проставляться прочерки.")
+        );
+    }
 }

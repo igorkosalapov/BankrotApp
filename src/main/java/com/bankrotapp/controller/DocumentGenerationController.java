@@ -1,9 +1,12 @@
 package com.bankrotapp.controller;
 
 import com.bankrotapp.model.Address;
+import com.bankrotapp.model.BankAccount;
 import com.bankrotapp.model.Contract;
 import com.bankrotapp.model.Creditor;
 import com.bankrotapp.model.Debtor;
+import com.bankrotapp.model.RealEstateItem;
+import com.bankrotapp.model.Vehicle;
 import com.bankrotapp.service.DebtCalculationService;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.apache.poi.xwpf.usermodel.XWPFParagraph;
@@ -27,6 +30,7 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 @RestController
 public class DocumentGenerationController {
@@ -85,6 +89,54 @@ public class DocumentGenerationController {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.wordprocessingml.document"));
         headers.setContentDisposition(ContentDisposition.attachment().filename("prilozhenie-1.docx").build());
+
+        return ResponseEntity.ok()
+                .headers(headers)
+                .body(generated);
+    }
+
+    @PostMapping(value = "/generate/appendix-2", produces = "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+    public ResponseEntity<byte[]> generatePropertyInventory() throws IOException {
+        Debtor debtor = new Debtor(
+                "Иванов Иван Иванович",
+                LocalDate.of(1989, 3, 14),
+                "112-233-445 95",
+                "770123456789",
+                "4510 123456",
+                new Address("Россия", "г. Москва", "Москва", "Тверская", "10", "15", "125009"),
+                new Address("Россия", "г. Москва", "Москва", "Тверская", "10", "15", "125009"),
+                "79161234567",
+                "ivanov@example.com",
+                "г. Москва"
+        );
+
+        List<RealEstateItem> realEstateItems = List.of(
+                new RealEstateItem("квартира", debtor.registrationAddress(), 62.4, "Собственность")
+        );
+        List<Vehicle> vehicles = List.of(
+                new Vehicle("легковой автомобиль", "Hyundai", "Solaris", "X7LBR32AAB1234567", 2017)
+        );
+        List<BankAccount> bankAccounts = List.of();
+
+        ClassPathResource template = new ClassPathResource("templates/Prilozhenie_2.docx");
+        byte[] generated;
+
+        try (InputStream inputStream = template.getInputStream();
+             XWPFDocument document = new XWPFDocument(inputStream)) {
+            fillDebtorInfo(document, debtor);
+            fillRealEstateTable(document.getTables().get(1), realEstateItems);
+            fillVehicleTable(document.getTables().get(2), vehicles, debtor.registrationAddress());
+            fillBankAccountsTable(document.getTables().get(3), bankAccounts);
+
+            try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+                document.write(out);
+                generated = out.toByteArray();
+            }
+        }
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.wordprocessingml.document"));
+        headers.setContentDisposition(ContentDisposition.attachment().filename("prilozhenie-2.docx").build());
 
         return ResponseEntity.ok()
                 .headers(headers)
@@ -199,6 +251,146 @@ public class DocumentGenerationController {
 
     private String safe(String value) {
         return value == null || value.isBlank() ? DASH : value;
+    }
+
+    private void fillRealEstateTable(XWPFTable table, List<RealEstateItem> items) {
+        fillRealEstateCategoryRow(table, 2, "земел", items);
+        fillRealEstateCategoryRow(table, 4, "дом", items, "дач");
+        fillRealEstateCategoryRow(table, 6, "квартир", items);
+        fillRealEstateCategoryRow(table, 7, "гараж", items);
+        fillRealEstateCategoryRow(table, 9, "ин", items);
+
+        clearRowToDashes(table.getRow(3), 1);
+        clearRowToDashes(table.getRow(5), 1);
+        clearRowToDashes(table.getRow(8), 1);
+        clearRowToDashes(table.getRow(10), 1);
+    }
+
+    private void fillRealEstateCategoryRow(XWPFTable table, int rowIndex, String keyword, List<RealEstateItem> items, String... extraKeywords) {
+        RealEstateItem item = items.stream()
+                .filter(candidate -> matchesCategory(candidate.type(), keyword, extraKeywords))
+                .findFirst()
+                .orElse(null);
+
+        XWPFTableRow row = table.getRow(rowIndex);
+        if (item == null) {
+            for (int col = 2; col <= 6; col++) {
+                setCellText(row.getCell(col), DASH);
+            }
+            return;
+        }
+
+        setCellText(row.getCell(2), safe(item.ownershipType()));
+        setCellText(row.getCell(3), formatAddress(item.address()));
+        setCellText(row.getCell(4), item.areaSquareMeters() == null ? DASH : formatDecimal(item.areaSquareMeters()));
+        setCellText(row.getCell(5), "Правоустанавливающие документы");
+        setCellText(row.getCell(6), DASH);
+    }
+
+    private void fillVehicleTable(XWPFTable table, List<Vehicle> vehicles, Address storageAddress) {
+        fillVehicleCategoryRow(table, 2, "легк", vehicles, storageAddress);
+        fillVehicleCategoryRow(table, 4, "груз", vehicles, storageAddress);
+        fillVehicleCategoryRow(table, 6, "мото", vehicles, storageAddress);
+        fillVehicleCategoryRow(table, 8, "сельск", vehicles, storageAddress);
+        fillVehicleCategoryRow(table, 10, "водн", vehicles, storageAddress);
+        fillVehicleCategoryRow(table, 12, "возд", vehicles, storageAddress);
+        fillVehicleCategoryRow(table, 14, "ин", vehicles, storageAddress);
+
+        clearRowToDashes(table.getRow(3), 1);
+        clearRowToDashes(table.getRow(5), 1);
+        clearRowToDashes(table.getRow(7), 1);
+        clearRowToDashes(table.getRow(9), 1);
+        clearRowToDashes(table.getRow(11), 1);
+        clearRowToDashes(table.getRow(13), 1);
+        clearRowToDashes(table.getRow(15), 1);
+    }
+
+    private void fillVehicleCategoryRow(XWPFTable table, int rowIndex, String keyword, List<Vehicle> vehicles, Address storageAddress) {
+        Vehicle vehicle = vehicles.stream()
+                .filter(candidate -> matchesCategory(candidate.type(), keyword))
+                .findFirst()
+                .orElse(null);
+
+        XWPFTableRow row = table.getRow(rowIndex);
+        if (vehicle == null) {
+            for (int col = 2; col <= 6; col++) {
+                setCellText(row.getCell(col), DASH);
+            }
+            return;
+        }
+
+        String vehicleLabel = List.of(safe(vehicle.brand()), safe(vehicle.model()), safe(vehicle.year() == null ? null : String.valueOf(vehicle.year())))
+                .stream()
+                .filter(value -> !DASH.equals(value))
+                .reduce((left, right) -> left + " " + right)
+                .orElse(DASH);
+
+        setCellText(row.getCell(1), row.getCell(1).getText().replace("1)", "1) " + vehicleLabel));
+        setCellText(row.getCell(2), safe(vehicle.registrationNumber()));
+        setCellText(row.getCell(3), "Собственность");
+        setCellText(row.getCell(4), formatAddress(storageAddress));
+        setCellText(row.getCell(5), DASH);
+        setCellText(row.getCell(6), DASH);
+    }
+
+    private void fillBankAccountsTable(XWPFTable table, List<BankAccount> bankAccounts) {
+        for (int rowIndex = 2; rowIndex <= 6; rowIndex++) {
+            XWPFTableRow row = table.getRow(rowIndex);
+            BankAccount account = rowIndex - 2 < bankAccounts.size() ? bankAccounts.get(rowIndex - 2) : null;
+
+            setCellText(row.getCell(1), account == null ? DASH : safe(account.bankNameAndAddress()));
+            setCellText(row.getCell(2), account == null ? DASH : safe(account.accountTypeAndCurrency()));
+            setCellText(row.getCell(3), account == null || account.openDate() == null ? DASH : account.openDate().format(DATE_FORMATTER));
+            setCellText(row.getCell(4), account == null ? DASH : safe(account.balanceRubles()));
+        }
+    }
+
+    private String formatAddress(Address address) {
+        if (address == null) {
+            return DASH;
+        }
+
+        List<String> chunks = new ArrayList<>();
+        chunks.add(address.postalCode());
+        chunks.add(address.region());
+        chunks.add(address.city());
+        chunks.add(address.street());
+        chunks.add(address.house() == null || address.house().isBlank() ? null : "д. " + address.house());
+        chunks.add(address.apartment() == null || address.apartment().isBlank() ? null : "кв. " + address.apartment());
+
+        return chunks.stream()
+                .filter(chunk -> chunk != null && !chunk.isBlank())
+                .reduce((left, right) -> left + ", " + right)
+                .orElse(DASH);
+    }
+
+    private String formatDecimal(Double value) {
+        return value == null ? DASH : String.format(Locale.ROOT, "%.1f", value);
+    }
+
+    private void clearRowToDashes(XWPFTableRow row, int startCell) {
+        if (row == null) {
+            return;
+        }
+        for (int cellIndex = startCell; cellIndex < row.getTableCells().size(); cellIndex++) {
+            setCellText(row.getCell(cellIndex), DASH);
+        }
+    }
+
+    private boolean matchesCategory(String value, String keyword, String... extraKeywords) {
+        if (value == null || value.isBlank()) {
+            return false;
+        }
+        String normalized = value.toLowerCase(Locale.ROOT);
+        if (normalized.contains(keyword)) {
+            return true;
+        }
+        for (String extraKeyword : extraKeywords) {
+            if (normalized.contains(extraKeyword)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private record CreditorContractRow(
