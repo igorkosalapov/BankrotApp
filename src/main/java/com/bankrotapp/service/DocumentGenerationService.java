@@ -160,8 +160,48 @@ public class DocumentGenerationService {
         map.put("creditor.sample1", DASH);
         map.put("creditor.sample2", DASH);
         map.put("creditor.sample3", DASH);
+        map.put("creditorsBlock", creditorsBlock(data.creditors()));
+        map.put("realEstateBlock", propertyPresenceBlock(data.propertyInfo().realEstateItems(), "отсутствует"));
+        map.put("vehicleBlock", propertyPresenceBlock(data.propertyInfo().vehicles(), "отсутствует"));
+        map.put("familyBlock", familyBlock(data));
+        map.put("employmentBlock", employmentBlock(data));
+        map.put("attachmentsBlock", "Приложение №1; Приложение №2.");
+        map.put("signatureFullName", safe(debtor.fullName()));
         map.put("totalDebtFormatted", debtCalculationService.formatAmountRu(debtCalculationService.calculateTotalDebt(data.creditors())));
         return map;
+    }
+
+    private String creditorsBlock(List<Creditor> creditors) {
+        if (creditors == null || creditors.isEmpty()) {
+            return "Кредиторы отсутствуют.";
+        }
+        return creditors.stream()
+                .map(Creditor::name)
+                .filter(name -> name != null && !name.isBlank())
+                .reduce((left, right) -> left + "; " + right)
+                .orElse("Кредиторы отсутствуют.");
+    }
+
+    private String propertyPresenceBlock(List<?> items, String emptyText) {
+        return (items == null || items.isEmpty()) ? emptyText : "имеется";
+    }
+
+    private String familyBlock(BankruptcyApplicationData data) {
+        if (data.familyInfo() == null) {
+            return DASH;
+        }
+        String marriage = data.familyInfo().married() ? "в браке" : "брак расторгнут";
+        String children = data.familyInfo().children().isEmpty() ? "Дети: отсутствуют." : "Дети: имеются.";
+        return marriage + ". " + children;
+    }
+
+    private String employmentBlock(BankruptcyApplicationData data) {
+        if (data.employmentInfo() == null) {
+            return DASH;
+        }
+        return "UNEMPLOYED".equalsIgnoreCase(data.employmentInfo().employmentStatus())
+                ? "официально не трудоустроен"
+                : safe(data.employmentInfo().employerName());
     }
 
     private void addZipEntry(ZipOutputStream zipOutputStream, String fileName, byte[] fileBytes) throws IOException {
@@ -556,65 +596,4 @@ public class DocumentGenerationService {
         return fioParts[0] + " " + firstInitial + middleInitial;
     }
 
-    private void scrubLegacyTemplateArtifacts(XWPFDocument document, Debtor debtor) {
-        String[] fioParts = splitFio(debtor.fullName());
-        String fullName = safe(debtor.fullName());
-        String lastName = fioParts[0];
-        replaceLegacyMarkersInParagraphs(document.getParagraphs(), fullName, lastName);
-        replaceLegacyMarkersInTables(document.getTables(), fullName, lastName);
-
-        for (XWPFHeader header : document.getHeaderList()) {
-            replaceLegacyMarkersInParagraphs(header.getParagraphs(), fullName, lastName);
-            replaceLegacyMarkersInTables(header.getTables(), fullName, lastName);
-        }
-        for (XWPFFooter footer : document.getFooterList()) {
-            replaceLegacyMarkersInParagraphs(footer.getParagraphs(), fullName, lastName);
-            replaceLegacyMarkersInTables(footer.getTables(), fullName, lastName);
-        }
-    }
-
-    private void replaceLegacyMarkersInTables(List<XWPFTable> tables, String fullName, String lastName) {
-        for (XWPFTable table : tables) {
-            for (XWPFTableRow row : table.getRows()) {
-                for (XWPFTableCell cell : row.getTableCells()) {
-                    replaceLegacyMarkersInParagraphs(cell.getParagraphs(), fullName, lastName);
-                    replaceLegacyMarkersInTables(cell.getTables(), fullName, lastName);
-                }
-            }
-        }
-    }
-
-    private void replaceLegacyMarkersInParagraphs(List<XWPFParagraph> paragraphs, String fullName, String lastName) {
-        for (XWPFParagraph paragraph : paragraphs) {
-            String source = paragraph.getText();
-            if (source == null || source.isBlank()) {
-                continue;
-            }
-
-            String updated = source
-                    .replace("Захаров Владимир Игоревич", fullName)
-                    .replace("Захаров В. И.", shortName(fullName))
-                    .replace("Захаров", lastName);
-
-            if (source.equals(updated)) {
-                continue;
-            }
-
-            int runCount = paragraph.getRuns().size();
-            for (int i = runCount - 1; i >= 0; i--) {
-                paragraph.removeRun(i);
-            }
-            paragraph.createRun().setText(updated);
-        }
-    }
-
-    private String shortName(String fullName) {
-        String[] fioParts = splitFio(fullName);
-        if (DASH.equals(fioParts[0])) {
-            return DASH;
-        }
-        String firstInitial = DASH.equals(fioParts[1]) ? "" : fioParts[1].charAt(0) + ".";
-        String middleInitial = DASH.equals(fioParts[2]) ? "" : " " + fioParts[2].charAt(0) + ".";
-        return fioParts[0] + " " + firstInitial + middleInitial;
-    }
 }

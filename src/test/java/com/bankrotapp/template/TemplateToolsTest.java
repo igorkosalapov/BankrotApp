@@ -57,6 +57,18 @@ class TemplateToolsTest {
         }
     }
 
+    @Test
+    void testTemplatesDoNotContainRealSampleData() throws Exception {
+        TemplateCleanupTool.main(new String[]{tempDir.toString()});
+
+        for (String fileName : TemplatePaths.TEMPLATE_FILES) {
+            String xml = readWordXml(tempDir.resolve(fileName));
+            for (String marker : TemplatePaths.FORBIDDEN_MARKERS) {
+                assertFalse(xml.contains(marker), "Шаблон " + fileName + " содержит запрещённую строку: " + marker);
+            }
+        }
+    }
+
     private XWPFDocument open(Path path) throws IOException {
         return new XWPFDocument(Files.newInputStream(path));
     }
