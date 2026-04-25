@@ -38,26 +38,28 @@ class DocumentGenerationServiceTest {
     );
 
     @Test
-    void testGeneratedStatementForIvanovDoesNotContainTemplateDebtorData() throws Exception {
+    void testStatementKeepsLegalTemplateStructure() throws Exception {
         String text = extract(service.generateStatementDocx(ivanovClient()));
 
-        assertContainsWithPreview(text, "Иванов Сергей Николаевич");
-        assertNotContainsWithPreview(text, "Захаров");
-        assertNotContainsWithPreview(text, "ВЭББАНКИР");
-        assertNotContainsWithPreview(text, "ТУРБОЗАЙМ");
-        assertNotContainsWithPreview(text, "МИГКРЕДИТ");
-        assertNotContainsWithPreview(text, "MITSUBISHI RVR");
+        assertContainsWithPreview(text, "Заявление");
+        assertContainsWithPreview(text, "о признании несостоятельным (банкротом) должника - физического лица");
+        assertContainsWithPreview(text, "В соответствии со ст. 213.3");
+        assertContainsWithPreview(text, "Согласно ст. 213.4");
+        assertContainsWithPreview(text, "прошу суд");
+        assertContainsWithPreview(text, "Признать гражданина");
+        assertContainsWithPreview(text, "Утвердить финансового управляющего");
+        assertContainsWithPreview(text, "Приложение документов для Арбитражного суда");
     }
 
     @Test
-    void testGeneratedStatementContainsCurrentCreditorsAndTotalDebt() throws Exception {
+    void testStatementIsNotCollapsedToShortPreview() throws Exception {
+        byte[] statementBytes = service.generateStatementDocx(ivanovClient());
         String text = extract(service.generateStatementDocx(ivanovClient()));
+        int paragraphCount = paragraphCount(statementBytes);
 
-        assertContainsWithPreview(text, "АО Альфа-Банк");
-        assertContainsWithPreview(text, "ООО МКК Срочноденьги");
-        assertContainsWithPreview(text, "ООО ПКО Право Онлайн");
-        assertTrue(text.contains("375 000,00") || text.contains("375\u00A0000,00"),
-                "Ожидалась сумма 375 000,00. Фрагмент заявления:\n" + preview(text));
+        assertTrue(paragraphCount > 40, "Ожидалось, что документ не свернут в короткую выжимку.");
+        assertContainsWithPreview(text, "В соответствии со ст. 213.3");
+        assertContainsWithPreview(text, "Приложение документов для Арбитражного суда");
     }
 
     @Test
@@ -91,21 +93,61 @@ class DocumentGenerationServiceTest {
     }
 
     @Test
-    void testNoUnresolvedPlaceholdersInGeneratedDocuments() throws Exception {
-        byte[] zip = service.generateZip(ivanovClient());
+    void testGeneratedStatementForIvanovReplacesClientDataOnly() throws Exception {
+        String text = extract(service.generateStatementDocx(ivanovClient()));
 
-        for (byte[] docx : readDocxEntries(zip)) {
-            String xml = readWordXml(docx);
-            assertFalse(xml.contains("{{"), "В DOCX остались неразрешённые placeholders {{...}}.");
-            assertFalse(xml.contains("}}"), "В DOCX остались неразрешённые placeholders {{...}}.");
-        }
+        assertContainsWithPreview(text, "Иванов Сергей Николаевич");
+        assertContainsWithPreview(text, "АО Альфа-Банк");
+        assertContainsWithPreview(text, "ООО МКК Срочноденьги");
+        assertContainsWithPreview(text, "ООО ПКО Право Онлайн");
+        assertTrue(text.contains("375 000,00") || text.contains("375\u00A0000,00"),
+                "Ожидалась сумма 375 000,00. Фрагмент заявления:\n" + preview(text));
+
+        assertNotContainsWithPreview(text, "Захаров");
+        assertNotContainsWithPreview(text, "ВЭББАНКИР");
+        assertNotContainsWithPreview(text, "ТУРБОЗАЙМ");
+        assertNotContainsWithPreview(text, "МИГКРЕДИТ");
+        assertNotContainsWithPreview(text, "MITSUBISHI RVR");
+        assertNotContainsWithPreview(text, "1 248 887,93");
     }
 
     @Test
-    void testGeneratedZipForIvanovDoesNotContainOldStatementData() throws Exception {
+    void testStatementContainsCourtRequestSection() throws Exception {
+        String text = extract(service.generateStatementDocx(ivanovClient()));
+
+        assertContainsWithPreview(text, "прошу суд");
+        assertContainsWithPreview(text, "1.");
+        assertContainsWithPreview(text, "2.");
+        assertContainsWithPreview(text, "3.");
+    }
+
+    @Test
+    void testStatementContainsAttachmentsSection() throws Exception {
+        String text = extract(service.generateStatementDocx(ivanovClient()));
+
+        assertContainsWithPreview(text, "Приложение документов для Арбитражного суда");
+        assertContainsWithPreview(text, "Приложение №1");
+        assertContainsWithPreview(text, "Приложение №2");
+    }
+
+    @Test
+    void testNoUnresolvedPlaceholdersInStatement() throws Exception {
+        byte[] statement = service.generateStatementDocx(ivanovClient());
+        String xml = readWordXml(statement);
+
+        assertFalse(xml.contains("{{"), "В DOCX остались неразрешённые placeholders {{...}}.");
+        assertFalse(xml.contains("}}"), "В DOCX остались неразрешённые placeholders {{...}}.");
+    }
+
+    @Test
+    void testGeneratedZipUsesTemplatePreservingStatement() throws Exception {
         byte[] zip = service.generateZip(ivanovClient());
         byte[] statementDocx = readStatementDocx(zip);
         String text = extract(statementDocx);
+
+        assertContainsWithPreview(text, "о признании несостоятельным (банкротом) должника - физического лица");
+        assertContainsWithPreview(text, "прошу суд");
+        assertContainsWithPreview(text, "Приложение документов для Арбитражного суда");
 
         assertContainsWithPreview(text, "Иванов Сергей Николаевич");
         assertContainsWithPreview(text, "АО Альфа-Банк");
@@ -120,6 +162,17 @@ class DocumentGenerationServiceTest {
         assertNotContainsWithPreview(text, "МИГКРЕДИТ");
         assertNotContainsWithPreview(text, "MITSUBISHI RVR");
         assertNotContainsWithPreview(text, "1 248 887,93");
+    }
+
+    @Test
+    void testNoUnresolvedPlaceholdersInGeneratedDocuments() throws Exception {
+        byte[] zip = service.generateZip(ivanovClient());
+
+        for (byte[] docx : readDocxEntries(zip)) {
+            String xml = readWordXml(docx);
+            assertFalse(xml.contains("{{"), "В DOCX остались неразрешённые placeholders {{...}}.");
+            assertFalse(xml.contains("}}"), "В DOCX остались неразрешённые placeholders {{...}}.");
+        }
     }
 
     private BankruptcyApplicationData ivanovClient() {
@@ -163,6 +216,12 @@ class DocumentGenerationServiceTest {
         try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(bytes));
              XWPFWordExtractor extractor = new XWPFWordExtractor(document)) {
             return extractor.getText();
+        }
+    }
+
+    private int paragraphCount(byte[] bytes) throws Exception {
+        try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(bytes))) {
+            return document.getParagraphs().size();
         }
     }
 
