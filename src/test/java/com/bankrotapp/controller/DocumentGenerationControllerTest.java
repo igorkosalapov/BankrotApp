@@ -20,6 +20,7 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.not;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -197,7 +198,9 @@ class DocumentGenerationControllerTest {
     void shouldRedirectToFormWhenGenerateCalledWithoutSessionAndBody() throws Exception {
         mockMvc.perform(post("/generate"))
                 .andExpect(status().isSeeOther())
-                .andExpect(header().string("Location", containsString("/?error=")));
+                .andExpect(header().string("Location", containsString("/?error=")))
+                .andExpect(header().string("Location", containsString("%")))
+                .andExpect(header().string("Location", not(containsString("Сначала"))));
     }
 
     @Test

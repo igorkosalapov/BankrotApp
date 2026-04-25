@@ -20,6 +20,8 @@ import org.springframework.web.bind.annotation.RestController;
 import jakarta.servlet.http.HttpSession;
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.List;
 
@@ -37,8 +39,10 @@ public class DocumentGenerationController {
 
     @org.springframework.web.bind.annotation.ExceptionHandler(MissingPreviewSessionDataException.class)
     public ResponseEntity<Void> handleMissingPreviewSessionData() {
+        String errorMessage = "Сначала сформируйте предпросмотр и повторите генерацию";
+        String encodedErrorMessage = URLEncoder.encode(errorMessage, StandardCharsets.UTF_8);
         return ResponseEntity.status(303)
-                .header(HttpHeaders.LOCATION, "/?error=Сначала+сформируйте+предпросмотр+и+повторите+генерацию")
+                .header(HttpHeaders.LOCATION, "/?error=" + encodedErrorMessage)
                 .build();
     }
 
