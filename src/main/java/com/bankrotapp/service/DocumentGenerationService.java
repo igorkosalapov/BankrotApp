@@ -35,6 +35,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -46,6 +47,7 @@ public class DocumentGenerationService {
     private static final String DASH = "-";
     private static final String TEMPLATE_APPENDIX_1 = "templates/prilozhenie_1.docx";
     private static final String TEMPLATE_APPENDIX_2 = "templates/prilozhenie_2.docx";
+    private static final String TEMPLATE_STATEMENT = "templates/zayavlenie.docx";
     private static final List<String> TEMPLATE_ARTIFACTS_FOR_IVANOV = List.of(
             "Захаров",
             "ВЭББАНКИР",
@@ -128,39 +130,22 @@ public class DocumentGenerationService {
         List<Creditor> creditors = data.creditors() == null ? List.of() : data.creditors();
         String totalDebt = debtCalculationService.formatAmountRu(debtCalculationService.calculateTotalDebt(creditors));
 
-        try (XWPFDocument document = new XWPFDocument();
+        byte[] rendered = renderTemplate(TEMPLATE_STATEMENT, placeholders(data));
+        try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(rendered));
              ByteArrayOutputStream out = new ByteArrayOutputStream()) {
-            appendParagraph(document, "ЗАЯВЛЕНИЕ о признании гражданина банкротом", true);
-            appendParagraph(document, "Должник: " + safe(debtor.fullName()), false);
-            appendParagraph(document, "Дата рождения: "
-                    + (debtor.birthDate() == null ? DASH : debtor.birthDate().format(DATE_FORMATTER)), false);
-            appendParagraph(document, "Место рождения: " + safe(debtor.birthPlace()), false);
-            appendParagraph(document, "Адрес регистрации: " + formatAddress(debtor.registrationAddress()), false);
-            appendParagraph(document, "СНИЛС: " + safe(debtor.snils()), false);
-            appendParagraph(document, "ИНН: " + safe(debtor.inn()), false);
-            appendParagraph(document, "Паспорт: " + safe(debtor.passportNumber()), false);
-            appendParagraph(document, "Кредиторы:", true);
-            if (creditors.isEmpty()) {
-                appendParagraph(document, "Кредиторы отсутствуют.", false);
-            } else {
-                for (Creditor creditor : creditors) {
-                    appendParagraph(document, "- " + safe(creditor.name()), false);
-                }
-            }
-            appendParagraph(document, "Общая сумма задолженности: " + totalDebt, true);
-            appendParagraph(document, "Приложения: Приложение №1; Приложение №2.", false);
-            appendParagraph(document, "Подпись: " + safe(debtor.fullName()), false);
-
+            replaceStatementClientData(document, data, totalDebt);
+            replaceStatementBlock(document, "{{creditorsHeaderBlock}}", creditorsHeaderBlock(creditors));
+            replaceStatementBlock(document, "{{creditorsDebtBlock}}", creditorsDebtBlock(creditors, totalDebt));
+            replaceStatementBlock(document, "{{realEstateBlock}}", realEstateStatementBlock(data.propertyInfo().realEstateItems()));
+            replaceStatementBlock(document, "{{vehicleBlock}}", vehicleStatementBlock(data.propertyInfo().vehicles()));
+            replaceStatementBlock(document, "{{familyBlock}}", familyBlock(data));
+            replaceStatementBlock(document, "{{employmentBlock}}", employmentBlock(data));
+            replaceStatementBlock(document, "{{loanPurposeBlock}}", loanPurposeBlock(data));
+            replaceStatementBlock(document, "{{financialHardshipBlock}}", financialHardshipBlock(data));
+            replaceStatementBlock(document, "{{attachmentsBlock}}", attachmentsStatementBlock(creditors));
             document.write(out);
             return out.toByteArray();
         }
-    }
-
-    private void appendParagraph(XWPFDocument document, String text, boolean bold) {
-        XWPFParagraph paragraph = document.createParagraph();
-        XWPFRun run = paragraph.createRun();
-        run.setBold(bold);
-        run.setText(text);
     }
 
     private byte[] renderTemplate(String templatePath, Map<String, String> placeholders) throws IOException {
@@ -182,10 +167,12 @@ public class DocumentGenerationService {
                 + (DASH.equals(fioParts[1]) ? "" : fioParts[1].charAt(0) + ". ")
                 + (DASH.equals(fioParts[2]) ? "" : fioParts[2].charAt(0) + "."));
         map.put("debtor.birthDate", debtor.birthDate() == null ? DASH : debtor.birthDate().format(DATE_FORMATTER));
+        map.put("debtor.birthDateText", debtor.birthDate() == null ? DASH : debtor.birthDate().format(DATE_FORMATTER));
         map.put("debtor.birthPlace", safe(debtor.birthPlace()));
         map.put("debtor.inn", safe(debtor.inn()));
         map.put("debtor.snils", safe(debtor.snils()));
         map.put("debtor.passportNumber", safe(debtor.passportNumber()));
+        map.put("debtor.passportFull", safe(debtor.passportNumber()));
         map.put("debtor.registrationAddress.region", debtor.registrationAddress() == null ? DASH : safe(debtor.registrationAddress().region()));
         map.put("debtor.registrationAddress.city", debtor.registrationAddress() == null ? DASH : safe(debtor.registrationAddress().city()));
         map.put("debtor.registrationAddress.street", debtor.registrationAddress() == null ? DASH : safe(debtor.registrationAddress().street()));
@@ -195,11 +182,15 @@ public class DocumentGenerationService {
         map.put("creditor.sample1", DASH);
         map.put("creditor.sample2", DASH);
         map.put("creditor.sample3", DASH);
-        map.put("creditorsBlock", creditorsBlock(data.creditors()));
+        map.put("creditorsBlock", creditorsDebtBlock(data.creditors(), debtCalculationService.formatAmountRu(debtCalculationService.calculateTotalDebt(data.creditors()))));
+        map.put("creditorsHeaderBlock", creditorsHeaderBlock(data.creditors()));
+        map.put("creditorsDebtBlock", creditorsDebtBlock(data.creditors(), debtCalculationService.formatAmountRu(debtCalculationService.calculateTotalDebt(data.creditors()))));
         map.put("realEstateBlock", propertyPresenceBlock(data.propertyInfo().realEstateItems(), "отсутствует"));
         map.put("vehicleBlock", propertyPresenceBlock(data.propertyInfo().vehicles(), "отсутствует"));
         map.put("familyBlock", familyBlock(data));
         map.put("employmentBlock", employmentBlock(data));
+        map.put("loanPurposeBlock", loanPurposeBlock(data));
+        map.put("financialHardshipBlock", financialHardshipBlock(data));
         map.put("attachmentsBlock", "Приложение №1; Приложение №2.");
         map.put("signatureFullName", safe(debtor.fullName()));
         map.put("totalDebtFormatted", debtCalculationService.formatAmountRu(debtCalculationService.calculateTotalDebt(data.creditors())));
@@ -215,6 +206,30 @@ public class DocumentGenerationService {
                 .filter(name -> name != null && !name.isBlank())
                 .reduce((left, right) -> left + "; " + right)
                 .orElse("Кредиторы отсутствуют.");
+    }
+
+    private String creditorsHeaderBlock(List<Creditor> creditors) {
+        if (creditors == null || creditors.isEmpty()) {
+            return "Кредиторы отсутствуют.";
+        }
+        List<String> lines = new ArrayList<>();
+        for (int i = 0; i < Math.min(3, creditors.size()); i++) {
+            lines.add("Кредитор " + (i + 1) + ": " + safe(creditors.get(i).name()));
+        }
+        return String.join("\n", lines);
+    }
+
+    private String creditorsDebtBlock(List<Creditor> creditors, String totalDebt) {
+        if (creditors == null || creditors.isEmpty()) {
+            return "Денежные обязательства отсутствуют.";
+        }
+        String shortName = creditors.stream()
+                .map(Creditor::name)
+                .filter(value -> value != null && !value.isBlank())
+                .reduce((left, right) -> left + ", " + right)
+                .orElse("кредиторами");
+        return "Должник имеет не исполненные денежные обязательства в размере "
+                + totalDebt + " рублей перед: " + shortName + ".";
     }
 
     private String propertyPresenceBlock(List<?> items, String emptyText) {
@@ -237,6 +252,36 @@ public class DocumentGenerationService {
         return "UNEMPLOYED".equalsIgnoreCase(data.employmentInfo().employmentStatus())
                 ? "официально не трудоустроен"
                 : safe(data.employmentInfo().employerName());
+    }
+
+    private String loanPurposeBlock(BankruptcyApplicationData data) {
+        return "Кредитные средства использованы на личные и бытовые нужды должника.";
+    }
+
+    private String financialHardshipBlock(BankruptcyApplicationData data) {
+        return "Ухудшение финансового положения связано с совокупным ростом долговой нагрузки и отсутствием достаточного дохода.";
+    }
+
+    private String realEstateStatementBlock(List<RealEstateItem> items) {
+        return items == null || items.isEmpty()
+                ? "Недвижимое имущество у должника отсутствует."
+                : "У должника имеется недвижимое имущество (перечень приведен в приложении №2).";
+    }
+
+    private String vehicleStatementBlock(List<Vehicle> vehicles) {
+        return vehicles == null || vehicles.isEmpty()
+                ? "Транспортные средства у должника отсутствуют."
+                : "У должника имеются транспортные средства (перечень приведен в приложении №2).";
+    }
+
+    private String attachmentsStatementBlock(List<Creditor> creditors) {
+        List<String> lines = new ArrayList<>();
+        lines.add("Список кредиторов и должников гражданина (Приложение №1).");
+        lines.add("Опись имущества гражданина (Приложение №2).");
+        for (Creditor creditor : Optional.ofNullable(creditors).orElse(List.of())) {
+            lines.add("Подтверждение задолженности перед " + safe(creditor.name()) + ".");
+        }
+        return String.join("\n", lines);
     }
 
     private void addZipEntry(ZipOutputStream zipOutputStream, String fileName, byte[] fileBytes) throws IOException {
@@ -629,6 +674,88 @@ public class DocumentGenerationService {
         String firstInitial = DASH.equals(fioParts[1]) ? "" : fioParts[1].charAt(0) + ".";
         String middleInitial = DASH.equals(fioParts[2]) ? "" : " " + fioParts[2].charAt(0) + ".";
         return fioParts[0] + " " + firstInitial + middleInitial;
+    }
+
+    private void replaceStatementClientData(XWPFDocument document, BankruptcyApplicationData data, String totalDebt) {
+        Debtor debtor = data.debtor();
+        String[] fio = splitFio(debtor.fullName());
+        String debtorShortName = shortName(debtor.fullName());
+        String debtorBirthDateText = debtor.birthDate() == null ? DASH : debtor.birthDate().format(DATE_FORMATTER);
+        String debtorPassport = safe(debtor.passportNumber());
+        String debtorAddress = formatAddress(debtor.registrationAddress());
+
+        List<Creditor> creditors = data.creditors() == null ? List.of() : data.creditors();
+        String creditor1 = creditors.size() > 0 ? safe(creditors.get(0).name()) : DASH;
+        String creditor2 = creditors.size() > 1 ? safe(creditors.get(1).name()) : DASH;
+        String creditor3 = creditors.size() > 2 ? safe(creditors.get(2).name()) : DASH;
+
+        replaceTextEverywhere(document, "Захаров Владимир Игоревич", safe(debtor.fullName()));
+        replaceTextEverywhere(document, "Захаров Владимира Игоревича", fio[0] + " " + fio[1] + "а " + fio[2]);
+        replaceTextEverywhere(document, "Захаров В. И.", debtorShortName);
+        replaceTextEverywhere(document, "Захаров В.И.", debtorShortName);
+        replaceTextEverywhere(document, "Захаров", fio[0]);
+        replaceTextEverywhere(document, "17 ноября 1984", debtorBirthDateText);
+        replaceTextEverywhere(document, "паспорт серия 75 10 742228", "паспорт: " + debtorPassport);
+        replaceTextEverywhere(document, "454014, Челябинская обл., Курчатовский р-н г. Челябинск, пр. Победы, д. 330, кв.44", debtorAddress);
+        replaceTextEverywhere(document, "774304839709", safe(debtor.inn()));
+        replaceTextEverywhere(document, "079-529-969 70", safe(debtor.snils()));
+        replaceTextEverywhere(document, "1 248 887,93", totalDebt);
+
+        replaceTextEverywhere(document, "ООО МФК \"ВЭББАНКИР\"", creditor1);
+        replaceTextEverywhere(document, "ООО МКК ТУРБОЗАЙМ", creditor2);
+        replaceTextEverywhere(document, "ООО \"МИГКРЕДИТ\"", creditor3);
+        replaceTextEverywhere(document, "ВЭББАНКИР", creditor1);
+        replaceTextEverywhere(document, "ТУРБОЗАЙМ", creditor2);
+        replaceTextEverywhere(document, "МИГКРЕДИТ", creditor3);
+    }
+
+    private void replaceStatementBlock(XWPFDocument document, String marker, String blockText) {
+        if (marker == null || marker.isBlank()) {
+            return;
+        }
+        replaceTextEverywhere(document, marker, blockText);
+    }
+
+    private void replaceTextEverywhere(XWPFDocument document, String from, String to) {
+        replaceInParagraphs(document.getParagraphs(), from, to);
+        replaceInTablesText(document.getTables(), from, to);
+        for (XWPFHeader header : document.getHeaderList()) {
+            replaceInParagraphs(header.getParagraphs(), from, to);
+            replaceInTablesText(header.getTables(), from, to);
+        }
+        for (XWPFFooter footer : document.getFooterList()) {
+            replaceInParagraphs(footer.getParagraphs(), from, to);
+            replaceInTablesText(footer.getTables(), from, to);
+        }
+    }
+
+    private void replaceInTablesText(List<XWPFTable> tables, String from, String to) {
+        for (XWPFTable table : tables) {
+            for (XWPFTableRow row : table.getRows()) {
+                for (XWPFTableCell cell : row.getTableCells()) {
+                    replaceInParagraphs(cell.getParagraphs(), from, to);
+                    replaceInTablesText(cell.getTables(), from, to);
+                }
+            }
+        }
+    }
+
+    private void replaceInParagraphs(List<XWPFParagraph> paragraphs, String from, String to) {
+        if (from == null || from.isBlank()) {
+            return;
+        }
+        for (XWPFParagraph paragraph : paragraphs) {
+            String text = paragraph.getText();
+            if (text == null || text.isEmpty() || !text.contains(from)) {
+                continue;
+            }
+            String updated = text.replace(from, to == null ? "" : to);
+            int runCount = paragraph.getRuns().size();
+            for (int i = runCount - 1; i >= 0; i--) {
+                paragraph.removeRun(i);
+            }
+            paragraph.createRun().setText(updated);
+        }
     }
 
 }
