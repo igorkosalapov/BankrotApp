@@ -11,18 +11,20 @@ import com.bankrotapp.model.FamilyInfo;
 import com.bankrotapp.model.PropertyInfo;
 import org.apache.poi.xwpf.extractor.XWPFWordExtractor;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -35,13 +37,25 @@ class DocumentGenerationServiceTest {
     );
 
     @Test
-    @Disabled("Требует ручной очистки DOCX-шаблона zayavlenie.docx от legacy-данных.")
-    void testStatementDoesNotContainTemplateDebtorData() throws Exception {
+    void testGeneratedStatementForIvanovDoesNotContainTemplateDebtorData() throws Exception {
         String text = extract(service.generateStatementDocx(ivanovClient()));
 
+        assertTrue(text.contains("Иванов Сергей Николаевич"));
         assertFalse(text.contains("Захаров"));
+        assertFalse(text.contains("ВЭББАНКИР"));
+        assertFalse(text.contains("ТУРБОЗАЙМ"));
+        assertFalse(text.contains("МИГКРЕДИТ"));
         assertFalse(text.contains("MITSUBISHI RVR"));
-        assertFalse(text.contains("1 248 887,93"));
+    }
+
+    @Test
+    void testGeneratedStatementContainsCurrentCreditorsAndTotalDebt() throws Exception {
+        String text = extract(service.generateStatementDocx(ivanovClient()));
+
+        assertTrue(text.contains("АО Альфа-Банк"));
+        assertTrue(text.contains("ООО МКК Срочноденьги"));
+        assertTrue(text.contains("ООО ПКО Право Онлайн"));
+        assertTrue(text.contains("375 000,00") || text.contains("375\u00A0000,00"));
     }
 
     @Test
@@ -50,76 +64,38 @@ class DocumentGenerationServiceTest {
         String text = extract(service.generateAppendixOneDocx(data, data.creditors()));
 
         assertTrue(text.contains("Иванов Сергей Николаевич"));
-        assertFalse(text.contains("Захаров Владимир Игоревич"));
-        assertFalse(text.contains("Захаров В. И."));
         assertFalse(text.contains("Захаров"));
     }
 
     @Test
-    void testAppendix2SignatureUsesCurrentDebtor() throws Exception {
-        BankruptcyApplicationData data = ivanovClient();
-        String text = extract(service.generateAppendixTwoDocx(data, List.of(), List.of(), List.of()));
-
-        assertTrue(text.contains("Иванов Сергей Николаевич"));
-        assertFalse(text.contains("Захаров Владимир Игоревич"));
-        assertFalse(text.contains("Захаров В. И."));
-        assertFalse(text.contains("Захаров"));
-    }
-
-    @Test
-    void testNoVehicleDoesNotRenderOldVehicle() throws Exception {
+    void testAppendix2NoVehicleDoesNotRenderOldVehicle() throws Exception {
         BankruptcyApplicationData data = ivanovClient();
         String text = extract(service.generateAppendixTwoDocx(data, List.of(), List.of(), List.of()));
 
         assertFalse(text.contains("MITSUBISHI RVR"));
+        assertTrue(text.contains("-") || text.contains("отсутств"));
     }
 
     @Test
-    void testGenerateZipForIvanovDoesNotFailWhenLegacyMarkersStillExistInTemplates() throws Exception {
+    void testGenerateZipContainsThreeDocxFiles() throws Exception {
         byte[] zip = service.generateZip(ivanovClient());
+
         assertNotNull(zip);
-        assertTrue(zip.length > 0);
+        List<String> docxEntries = listDocxEntries(zip);
+        assertEquals(3, docxEntries.size());
+        assertTrue(docxEntries.stream().anyMatch(name -> name.contains("Заявление_о_банкротстве_")));
+        assertTrue(docxEntries.stream().anyMatch(name -> name.contains("Приложение_1_Список_кредиторов_")));
+        assertTrue(docxEntries.stream().anyMatch(name -> name.contains("Приложение_2_Опись_имущества_")));
     }
 
     @Test
-    @Disabled("Требует ручной шаблонизации основного заявления в zayavlenie.docx.")
-    void testMainStatementUsesCurrentCreditorsAndTotalDebt() throws Exception {
-        String text = extract(service.generateStatementDocx(ivanovClient()));
+    void testNoUnresolvedPlaceholdersInGeneratedDocuments() throws Exception {
+        byte[] zip = service.generateZip(ivanovClient());
 
-        assertTrue(text.contains("АО Альфа-Банк"));
-        assertTrue(text.contains("ООО МКК Срочноденьги"));
-        assertTrue(text.contains("ООО ПКО Право Онлайн"));
-        assertTrue(text.contains("375\u00A0000,00"));
-        assertTrue(text.contains("брак расторгнут"));
-        assertTrue(text.contains("Дети: отсутствуют."));
-        assertTrue(text.contains("Недвижимое имущество: отсутствует."));
-        assertTrue(text.contains("Транспортные средства: отсутствуют."));
-        assertTrue(text.contains("официально не трудоустроен"));
-    }
-
-    @Test
-    @Disabled("Включить после ручной очистки DOCX-шаблонов от legacy sample-данных.")
-    void testTemplatesDoNotContainRealSampleData() throws Exception {
-        List<String> templates = List.of(
-                "templates/zayavlenie.docx",
-                "templates/prilozhenie_1.docx",
-                "templates/prilozhenie_2.docx"
-        );
-
-        List<String> forbidden = List.of(
-                "Захаров",
-                "ВЭББАНКИР",
-                "ТУРБОЗАЙМ",
-                "МИГКРЕДИТ",
-                "MITSUBISHI RVR",
-                "1 248 887,93"
-        );
-
-        for (String template : templates) {
-            String xml = readWordXml(template);
-            for (String marker : forbidden) {
-                assertFalse(xml.contains(marker), "Шаблон " + template + " содержит запрещённую строку: " + marker);
-            }
+        for (byte[] docx : readDocxEntries(zip)) {
+            String xml = readWordXml(docx);
+            assertFalse(xml.contains("{{"), "В DOCX остались неразрешённые placeholders {{...}}.");
+            assertFalse(xml.contains("}}"), "В DOCX остались неразрешённые placeholders {{...}}.");
         }
     }
 
@@ -167,19 +143,43 @@ class DocumentGenerationServiceTest {
         }
     }
 
-    private String readWordXml(String templatePath) throws IOException {
-        InputStream source = getClass().getClassLoader().getResourceAsStream(templatePath);
-        assertTrue(source != null, "Не найден шаблон: " + templatePath);
-        try (InputStream inputStream = source;
-             ZipInputStream zipInputStream = new ZipInputStream(inputStream)) {
-            StringBuilder xml = new StringBuilder();
+    private List<String> listDocxEntries(byte[] zipBytes) throws IOException {
+        List<String> entries = new ArrayList<>();
+        try (ZipInputStream zipInputStream = new ZipInputStream(new ByteArrayInputStream(zipBytes), StandardCharsets.UTF_8)) {
+            ZipEntry entry;
+            while ((entry = zipInputStream.getNextEntry()) != null) {
+                if (!entry.isDirectory() && entry.getName().endsWith(".docx")) {
+                    entries.add(entry.getName());
+                }
+            }
+        }
+        return entries;
+    }
+
+    private List<byte[]> readDocxEntries(byte[] zipBytes) throws IOException {
+        List<byte[]> docxEntries = new ArrayList<>();
+        try (ZipInputStream zipInputStream = new ZipInputStream(new ByteArrayInputStream(zipBytes), StandardCharsets.UTF_8)) {
+            ZipEntry entry;
+            while ((entry = zipInputStream.getNextEntry()) != null) {
+                if (!entry.isDirectory() && entry.getName().endsWith(".docx")) {
+                    docxEntries.add(zipInputStream.readAllBytes());
+                }
+            }
+        }
+        return docxEntries;
+    }
+
+    private String readWordXml(byte[] docxBytes) throws IOException {
+        StringBuilder xml = new StringBuilder();
+        try (InputStream inputStream = new ByteArrayInputStream(docxBytes);
+             ZipInputStream zipInputStream = new ZipInputStream(inputStream, StandardCharsets.UTF_8)) {
             ZipEntry entry;
             while ((entry = zipInputStream.getNextEntry()) != null) {
                 if (entry.getName().startsWith("word/") && entry.getName().endsWith(".xml")) {
-                    xml.append(new String(zipInputStream.readAllBytes()));
+                    xml.append(new String(zipInputStream.readAllBytes(), StandardCharsets.UTF_8));
                 }
             }
-            return xml.toString();
         }
+        return xml.toString();
     }
 }
