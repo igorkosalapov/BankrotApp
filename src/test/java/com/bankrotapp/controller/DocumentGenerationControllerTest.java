@@ -152,7 +152,15 @@ class DocumentGenerationControllerTest {
 
     @Test
     void shouldGenerateZipWithThreeDocxFilesAndDebtorFioInFileNames() throws Exception {
-        MvcResult result = mockMvc.perform(post("/generate"))
+        MvcResult previewResult = mockMvc.perform(post("/preview")
+                        .contentType("application/x-www-form-urlencoded")
+                        .param("fullName", "Захаров Владимир Игоревич")
+                        .param("creditorLines", "Банк А|Договор 1|1000"))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        MvcResult result = mockMvc.perform(post("/generate")
+                        .session((org.springframework.mock.web.MockHttpSession) previewResult.getRequest().getSession(false)))
                 .andExpect(status().isOk())
                 .andExpect(header().string("Content-Type", containsString("application/zip")))
                 .andReturn();
@@ -166,7 +174,7 @@ class DocumentGenerationControllerTest {
             while ((entry = zipInputStream.getNextEntry()) != null) {
                 fileNames.add(entry.getName());
 
-                if (entry.getName().startsWith("Prilozhenie_1_")) {
+                if (entry.getName().startsWith("Приложение_1_")) {
                     try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(readEntryBytes(zipInputStream)));
                          XWPFWordExtractor extractor = new XWPFWordExtractor(document)) {
                         appendixOneText[0] = extractor.getText();
@@ -177,11 +185,19 @@ class DocumentGenerationControllerTest {
 
         assertAll(
                 () -> assertEquals(3, fileNames.size(), "ZIP должен содержать три DOCX-файла."),
-                () -> assertTrue(fileNames.stream().anyMatch(name -> name.equals("Zayavlenie_Иванов_Иван_Иванович.docx")), "ZIP должен содержать заявление с ФИО в имени файла."),
-                () -> assertTrue(fileNames.stream().anyMatch(name -> name.equals("Prilozhenie_1_Иванов_Иван_Иванович.docx")), "ZIP должен содержать приложение №1 с ФИО в имени файла."),
-                () -> assertTrue(fileNames.stream().anyMatch(name -> name.equals("Prilozhenie_2_Иванов_Иван_Иванович.docx")), "ZIP должен содержать приложение №2 с ФИО в имени файла."),
+                () -> assertTrue(fileNames.stream().anyMatch(name -> name.equals("Заявление_о_банкротстве_Захаров_Владимир_Игоревич.docx")), "ZIP должен содержать заявление с ФИО в имени файла."),
+                () -> assertTrue(fileNames.stream().anyMatch(name -> name.equals("Приложение_1_Список_кредиторов_Захаров_Владимир_Игоревич.docx")), "ZIP должен содержать приложение №1 с ФИО в имени файла."),
+                () -> assertTrue(fileNames.stream().anyMatch(name -> name.equals("Приложение_2_Опись_имущества_Захаров_Владимир_Игоревич.docx")), "ZIP должен содержать приложение №2 с ФИО в имени файла."),
                 () -> assertTrue(appendixOneText[0].contains("Список кредиторов и должников гражданина"), "Приложение №1 в ZIP должно корректно генерироваться.")
         );
+    }
+
+
+    @Test
+    void shouldRedirectToFormWhenGenerateCalledWithoutSessionAndBody() throws Exception {
+        mockMvc.perform(post("/generate"))
+                .andExpect(status().isSeeOther())
+                .andExpect(header().string("Location", containsString("/?error=")));
     }
 
     @Test

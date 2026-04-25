@@ -1,10 +1,18 @@
 package com.bankrotapp.controller;
 
+import com.bankrotapp.model.Address;
+import com.bankrotapp.model.BankruptcyApplicationData;
 import com.bankrotapp.model.Contract;
 import com.bankrotapp.model.Creditor;
+import com.bankrotapp.model.Debtor;
+import com.bankrotapp.model.EmploymentInfo;
+import com.bankrotapp.model.PropertyInfo;
+import com.bankrotapp.model.RealEstateItem;
+import com.bankrotapp.model.Vehicle;
 import com.bankrotapp.openai.OpenAiTextBlockService;
 import com.bankrotapp.openai.OpenAiTextBlocks;
 import com.bankrotapp.service.DebtCalculationService;
+import jakarta.servlet.http.HttpSession;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -136,9 +144,16 @@ public class WebPreviewController {
                               @RequestParam(required = false, defaultValue = "EMPLOYED") String employmentStatus,
                               @RequestParam(required = false, defaultValue = "") String hardshipReasonInput,
                               @RequestParam(required = false, defaultValue = "") String employmentIncomeInput,
-                              @RequestParam(required = false, defaultValue = "") String loanFundsUsageInput) {
+                              @RequestParam(required = false, defaultValue = "") String loanFundsUsageInput,
+                              HttpSession session) {
 
         List<Creditor> creditors = parseCreditors(creditorLines);
+        List<RealEstateItem> realEstateItems = parseRealEstateItems(realEstateLines);
+        List<Vehicle> vehicles = parseVehicles(vehicleLines);
+
+        BankruptcyApplicationData dataForDocx = buildApplicationData(fullName, creditors, realEstateItems, vehicles, employmentStatus);
+        session.setAttribute(DocumentGenerationController.SESSION_PREVIEW_DATA, dataForDocx);
+
         BigDecimal totalDebt = debtCalculationService.calculateTotalDebt(creditors);
         String familyBlock = buildFamilyBlock(maritalStatus, spouseName, marriageDate, marriageCertificate,
                 divorceDate, divorceCertificate, spouseDeathDate, deathCertificate, childrenLines);
@@ -162,6 +177,8 @@ public class WebPreviewController {
                         section { border: 1px solid #ddd; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
                         h2 { margin-top: 0; }
                         ul { margin: .4rem 0 .8rem 1.2rem; }
+                        .action { margin-top: 1.8rem; }
+                        .action button { padding: 1rem 1.4rem; cursor: pointer; font-size: 1.05rem; font-weight: 700; background: #0b6bcb; color: #fff; border: 0; border-radius: 8px; }
                     </style>
                 </head>
                 <body>
@@ -212,6 +229,13 @@ public class WebPreviewController {
                 .append(escape(employmentBlock))
                 .append("</pre></section>");
 
+        html.append("<section><h2>Данные, которые уйдут в DOCX</h2>")
+                .append("<p><strong>ФИО:</strong> ").append(escape(dataForDocx.debtor().fullName())).append("</p>")
+                .append("<p><strong>Кредиторов:</strong> ").append(dataForDocx.creditors().size()).append("</p>")
+                .append("<p><strong>Недвижимости:</strong> ").append(dataForDocx.propertyInfo().realEstateItems().size()).append("</p>")
+                .append("<p><strong>Транспорта:</strong> ").append(dataForDocx.propertyInfo().vehicles().size()).append("</p>")
+                .append("</section>");
+
         html.append("<section><h2>Вспомогательные блоки перед генерацией DOCX</h2>")
                 .append("<p><strong>Источник:</strong> ")
                 .append(auxiliaryTextBlocks.generatedByOpenAi() ? "OpenAI API" : "Пользовательский/стандартный fallback")
@@ -227,10 +251,64 @@ public class WebPreviewController {
                 .append("</p>")
                 .append("</section>");
 
+        html.append("<form class=\"action\" method=\"post\" action=\"/generate\">")
+                .append("<button type=\"submit\">Сформировать ZIP с DOCX-документами</button>")
+                .append("</form>");
+
         html.append("<p><a href='/'>← Назад к форме</a></p>")
                 .append("</body></html>");
 
         return html.toString();
+    }
+
+    private BankruptcyApplicationData buildApplicationData(String fullName,
+                                                           List<Creditor> creditors,
+                                                           List<RealEstateItem> realEstateItems,
+                                                           List<Vehicle> vehicles,
+                                                           String employmentStatus) {
+        Address address = new Address("Россия", "г. Москва", "Москва", "Тверская", "10", "15", "125009");
+        Debtor debtor = new Debtor(
+                fullName,
+                LocalDate.of(1989, 3, 14),
+                "112-233-445 95",
+                "770123456789",
+                "4510 123456",
+                address,
+                address,
+                "79161234567",
+                "preview@example.com",
+                "г. Москва"
+        );
+
+        PropertyInfo propertyInfo = new PropertyInfo(vehicles, realEstateItems, false);
+        EmploymentInfo employmentInfo = new EmploymentInfo(employmentStatus, "", "", BigDecimal.ZERO);
+        return new BankruptcyApplicationData(debtor, creditors, null, employmentInfo, propertyInfo);
+    }
+
+    private List<RealEstateItem> parseRealEstateItems(String realEstateLines) {
+        List<String[]> rows = parseStructuredLines(realEstateLines, 2);
+        List<RealEstateItem> items = new ArrayList<>();
+        for (String[] row : rows) {
+            items.add(new RealEstateItem(row[0],
+                    new Address("Россия", "г. Москва", "Москва", row[1], "", "", ""),
+                    null,
+                    "Собственность"));
+        }
+        return items;
+    }
+
+    private List<Vehicle> parseVehicles(String vehicleLines) {
+        List<String[]> rows = parseStructuredLines(vehicleLines, 5);
+        List<Vehicle> items = new ArrayList<>();
+        for (String[] row : rows) {
+            Integer year = null;
+            try {
+                year = Integer.parseInt(row[4]);
+            } catch (NumberFormatException ignored) {
+            }
+            items.add(new Vehicle(row[0], row[1], row[2], row[3], year));
+        }
+        return items;
     }
 
     private List<Creditor> parseCreditors(String creditorLines) {
@@ -256,7 +334,7 @@ public class WebPreviewController {
             String contractName = parts[1].trim();
             BigDecimal amount = parseAmount(parts[2].trim());
 
-            Contract contract = new Contract(contractName, "manual", amount, BigDecimal.ZERO, BigDecimal.ZERO);
+            Contract contract = new Contract(contractName, "loan", amount, BigDecimal.ZERO, BigDecimal.ZERO);
             grouped.computeIfAbsent(creditorName, key -> new ArrayList<>()).add(contract);
         }
 

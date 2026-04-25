@@ -28,6 +28,17 @@ class WebPreviewControllerTest {
     }
 
     @Test
+    void shouldRenderGenerateZipButtonOnPreviewPage() throws Exception {
+        mockMvc.perform(post("/preview")
+                        .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                        .param("fullName", "Иванов Иван Иванович")
+                        .param("creditorLines", "Банк А|Договор|1000"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("<form class=\"action\" method=\"post\" action=\"/generate\">")))
+                .andExpect(content().string(org.hamcrest.Matchers.containsString("Сформировать ZIP с DOCX-документами")));
+    }
+
+    @Test
     void shouldRenderSingleCreditorSingleContractBlock() throws Exception {
         mockMvc.perform(post("/preview")
                         .contentType(MediaType.APPLICATION_FORM_URLENCODED)
