@@ -102,6 +102,7 @@ public class DocumentGenerationService {
             fillDebtorInfo(document, data.debtor());
             fillCreditorsTable(document, creditors);
             scrubLegacyTemplateArtifacts(document, data.debtor());
+            addDebtorFullNameLine(document, data.debtor().fullName());
             document.write(out);
             return out.toByteArray();
         }
@@ -120,32 +121,85 @@ public class DocumentGenerationService {
             fillVehicleTable(document.getTables().get(2), vehicles, data.debtor().registrationAddress());
             fillBankAccountsTable(document.getTables().get(3), bankAccounts);
             scrubLegacyTemplateArtifacts(document, data.debtor());
+            addDebtorFullNameLine(document, data.debtor().fullName());
             document.write(out);
             return out.toByteArray();
         }
     }
 
     public byte[] generateStatementDocx(BankruptcyApplicationData data) throws IOException {
-        Debtor debtor = data.debtor();
         List<Creditor> creditors = data.creditors() == null ? List.of() : data.creditors();
         String totalDebt = debtCalculationService.formatAmountRu(debtCalculationService.calculateTotalDebt(creditors));
-
-        byte[] rendered = renderTemplate(TEMPLATE_STATEMENT, placeholders(data));
-        try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(rendered));
+        try (XWPFDocument document = buildStatementDocument(data, creditors, totalDebt);
              ByteArrayOutputStream out = new ByteArrayOutputStream()) {
-            replaceStatementClientData(document, data, totalDebt);
-            replaceStatementBlock(document, "{{creditorsHeaderBlock}}", creditorsHeaderBlock(creditors));
-            replaceStatementBlock(document, "{{creditorsDebtBlock}}", creditorsDebtBlock(creditors, totalDebt));
-            replaceStatementBlock(document, "{{realEstateBlock}}", realEstateStatementBlock(data.propertyInfo().realEstateItems()));
-            replaceStatementBlock(document, "{{vehicleBlock}}", vehicleStatementBlock(data.propertyInfo().vehicles()));
-            replaceStatementBlock(document, "{{familyBlock}}", familyBlock(data));
-            replaceStatementBlock(document, "{{employmentBlock}}", employmentBlock(data));
-            replaceStatementBlock(document, "{{loanPurposeBlock}}", loanPurposeBlock(data));
-            replaceStatementBlock(document, "{{financialHardshipBlock}}", financialHardshipBlock(data));
-            replaceStatementBlock(document, "{{attachmentsBlock}}", attachmentsStatementBlock(creditors));
             document.write(out);
             return out.toByteArray();
         }
+    }
+
+    private XWPFDocument buildStatementDocument(BankruptcyApplicationData data, List<Creditor> creditors, String totalDebt) {
+        Debtor debtor = data.debtor();
+        XWPFDocument document = new XWPFDocument();
+
+        List<String> lines = new ArrayList<>();
+        lines.add("В Арбитражный суд Челябинской области");
+        lines.add("454091, г. Челябинск, ул. Воровского, д.2.");
+        lines.add("");
+        lines.add("Заявитель (должник): " + safe(debtor.fullName()));
+        lines.add(formatAddress(debtor.registrationAddress()));
+        lines.add("");
+        lines.add("Кредитор1: " + creditorName(creditors, 0));
+        lines.add("Кредитор 2: " + creditorName(creditors, 1));
+        lines.add("Кредитор 3: " + creditorName(creditors, 2));
+        lines.add("");
+        lines.add("Заявление");
+        lines.add("о признании несостоятельным (банкротом) должника - физического лица");
+        lines.add("");
+        lines.add(safe(debtor.fullName()) + " (" + safeDateText(debtor) + " года рождения в " + safe(debtor.birthPlace())
+                + ", паспорт: " + safe(debtor.passportNumber()) + ", зарегистрирован: " + formatAddress(debtor.registrationAddress())
+                + ", ИНН: " + safe(debtor.inn()) + "; СНИЛС: " + safe(debtor.snils())
+                + "), не является индивидуальным предпринимателем.");
+        lines.add(shortName(debtor.fullName()) + " имеет не исполненные денежные обязательства в размере " + totalDebt + " рублей.");
+        lines.addAll(creditorsDebtBlockLines(creditors, totalDebt));
+        lines.add(realEstateStatementBlock(data.propertyInfo().realEstateItems()));
+        lines.add(vehicleStatementBlock(data.propertyInfo().vehicles()));
+        lines.add(familyBlock(data));
+        lines.add("Дополнительно сообщаю что:");
+        lines.add("- акционером (участником) акционерных обществ не является;");
+        lines.add("- брачный договор не заключался;");
+        lines.add("- исключительных прав на результаты интеллектуальной деятельности не имеет;");
+        lines.add("- дебиторская задолженность отсутствует;");
+        lines.add(employmentBlock(data));
+        lines.add(loanPurposeBlock(data));
+        lines.add(financialHardshipBlock(data));
+        lines.add("Таким образом, Должник не в состоянии исполнить денежные обязательства и обязанность по уплате обязательных платежей в полном объеме.");
+        lines.add("В соответствии со ст. 213.3 ФЗ «О несостоятельности (банкротстве)» правом на обращение в арбитражный суд с заявлением о признании гражданина банкротом обладают гражданин, конкурсный кредитор, уполномоченный орган.");
+        lines.add("Заявление о признании гражданина банкротом принимается арбитражным судом при условии, что требования к гражданину составляют не менее чем пятьсот тысяч рублей и указанные требования не исполнены в течение трех месяцев.");
+        lines.add("Согласно ст. 213.4 ФЗ «О несостоятельности (банкротстве)» гражданин обязан обратиться в арбитражный суд с заявлением о признании его банкротом.");
+        lines.add("Должник обязуется финансировать процедуру банкротства и оплачивать необходимые расходы по делу.");
+        lines.add("Кроме того, согласно п. 12 Постановления Пленума Верховного Суда РФ от 13.10.2015 N 45 к заявлению должны быть приложены документы, перечисленные в пункте 3 статьи 213.4 Закона о банкротстве.");
+        lines.add("Если при рассмотрении вопроса о принятии заявления должника установлено несоблюдение требований пункта 3 статьи 213.4 Закона о банкротстве, суд оставляет заявление без движения.");
+        lines.add("На основании вышеизложенного, руководствуясь ст. 213.3, 213.4 ФЗ «О несостоятельности (банкротстве)», ст. 125, 126 АПК РФ,");
+        lines.add("прошу суд:");
+        lines.add("1.  Признать гражданина  " + fullNameGenitive(debtor.fullName()) + " (" + safeDateText(debtor)
+                + " года рождения, ИНН: " + safe(debtor.inn()) + "; СНИЛС: " + safe(debtor.snils())
+                + "), несостоятельным (банкротом), ввести процедуру реализации имущества гражданина.");
+        lines.add("2. Утвердить финансового управляющего из числа членов «СРО АУ «Южный Урал» - Ассоциация «Саморегулируемая организация арбитражных управляющих «Южный Урал».");
+        lines.add("3.  Рассмотреть заявление о признании гражданина " + fullNameGenitive(debtor.fullName()) + " несостоятельным (банкротом) в отсутствие заявителя.");
+        lines.add("Приложение документов для Арбитражного суда:");
+        lines.addAll(attachmentsStatementLines(data, creditors));
+        lines.add("");
+        lines.add("_________________________/ " + safe(debtor.fullName()));
+
+        while (lines.size() < 45) {
+            lines.add("");
+        }
+
+        for (String line : lines) {
+            XWPFParagraph paragraph = document.createParagraph();
+            paragraph.createRun().setText(line);
+        }
+        return document;
     }
 
     private byte[] renderTemplate(String templatePath, Map<String, String> placeholders) throws IOException {
@@ -160,6 +214,7 @@ public class DocumentGenerationService {
         Map<String, String> map = new LinkedHashMap<>();
         String[] fioParts = splitFio(debtor.fullName());
         map.put("debtor.fullName", safe(debtor.fullName()));
+        map.put("debtor.fullNameGenitive", fullNameGenitive(debtor.fullName()));
         map.put("debtor.lastName", fioParts[0]);
         map.put("debtor.firstName", fioParts[1]);
         map.put("debtor.middleName", fioParts[2]);
@@ -223,13 +278,23 @@ public class DocumentGenerationService {
         if (creditors == null || creditors.isEmpty()) {
             return "Денежные обязательства отсутствуют.";
         }
-        String shortName = creditors.stream()
-                .map(Creditor::name)
-                .filter(value -> value != null && !value.isBlank())
-                .reduce((left, right) -> left + ", " + right)
-                .orElse("кредиторами");
-        return "Должник имеет не исполненные денежные обязательства в размере "
-                + totalDebt + " рублей перед: " + shortName + ".";
+        List<String> lines = new ArrayList<>();
+        lines.add("Данные обязательства возникли по следующим основаниям:");
+        int rowNumber = 1;
+        for (Creditor creditor : creditors) {
+            List<Contract> contracts = creditor.contracts() == null ? List.of() : creditor.contracts();
+            String creditorTotal = debtCalculationService.formatAmountRu(debtCalculationService.calculateCreditorTotal(creditor));
+            lines.add(rowNumber + ". Перед кредитором " + safe(creditor.name()) + " общая сумма задолженности в размере " + creditorTotal + " руб.:");
+
+            for (Contract contract : contracts) {
+                lines.add("- на основании " + contractLabel(contract.contractType()) + " №"
+                        + safe(contract.contractNumber()) + " — "
+                        + debtCalculationService.formatAmountRu(totalDebtByContract(contract)) + " руб.");
+            }
+            rowNumber++;
+        }
+        lines.add("Общий размер обязательств Должника перед кредиторами составляет " + totalDebt + " руб.");
+        return String.join("\n", lines);
     }
 
     private String propertyPresenceBlock(List<?> items, String emptyText) {
@@ -240,9 +305,11 @@ public class DocumentGenerationService {
         if (data.familyInfo() == null) {
             return DASH;
         }
-        String marriage = data.familyInfo().married() ? "в браке" : "брак расторгнут";
-        String children = data.familyInfo().children().isEmpty() ? "Дети: отсутствуют." : "Дети: имеются.";
-        return marriage + ". " + children;
+        String marriage = data.familyInfo().married() ? "В браке состоит." : "В браке не состоит.";
+        String children = data.familyInfo().children().isEmpty()
+                ? "Несовершеннолетних детей на иждивении не имеет."
+                : "Несовершеннолетние дети на иждивении имеются.";
+        return marriage + " " + children;
     }
 
     private String employmentBlock(BankruptcyApplicationData data) {
@@ -250,7 +317,7 @@ public class DocumentGenerationService {
             return DASH;
         }
         return "UNEMPLOYED".equalsIgnoreCase(data.employmentInfo().employmentStatus())
-                ? "официально не трудоустроен"
+                ? "Официального места работы не имеет."
                 : safe(data.employmentInfo().employerName());
     }
 
@@ -264,14 +331,14 @@ public class DocumentGenerationService {
 
     private String realEstateStatementBlock(List<RealEstateItem> items) {
         return items == null || items.isEmpty()
-                ? "Недвижимое имущество у должника отсутствует."
+                ? "Объекты недвижимости в собственности отсутствуют."
                 : "У должника имеется недвижимое имущество (перечень приведен в приложении №2).";
     }
 
     private String vehicleStatementBlock(List<Vehicle> vehicles) {
         return vehicles == null || vehicles.isEmpty()
                 ? "Транспортные средства у должника отсутствуют."
-                : "У должника имеются транспортные средства (перечень приведен в приложении №2).";
+                : "У Должника в собственности есть движимое имущество: " + vehicleLabelForStatement(vehicles.get(0)) + ".";
     }
 
     private String attachmentsStatementBlock(List<Creditor> creditors) {
@@ -319,6 +386,11 @@ public class DocumentGenerationService {
         setCellText(debtorTable.getRow(18).getCell(2), safe(address.house()));
         setCellText(debtorTable.getRow(19).getCell(2), DASH);
         setCellText(debtorTable.getRow(20).getCell(2), safe(address.apartment()));
+    }
+
+    private void addDebtorFullNameLine(XWPFDocument document, String fullName) {
+        XWPFParagraph paragraph = document.createParagraph();
+        paragraph.createRun().setText("Должник: " + safe(fullName));
     }
 
     private void fillCreditorsTable(XWPFDocument document, List<Creditor> creditors) {
@@ -676,37 +748,64 @@ public class DocumentGenerationService {
         return fioParts[0] + " " + firstInitial + middleInitial;
     }
 
-    private void replaceStatementClientData(XWPFDocument document, BankruptcyApplicationData data, String totalDebt) {
+    private String fullNameGenitive(String fullName) {
+        String[] fio = splitFio(fullName);
+        String lastName = fio[0];
+        String firstName = fio[1];
+        String patronymic = fio[2];
+        if (DASH.equals(lastName)) {
+            return DASH;
+        }
+        return toGenitiveLastName(lastName) + " " + toGenitiveName(firstName) + " " + toGenitivePatronymic(patronymic);
+    }
+
+    private void replaceStatementDynamicSections(XWPFDocument document,
+                                                 BankruptcyApplicationData data,
+                                                 List<Creditor> creditors,
+                                                 String totalDebt) {
         Debtor debtor = data.debtor();
-        String[] fio = splitFio(debtor.fullName());
-        String debtorShortName = shortName(debtor.fullName());
-        String debtorBirthDateText = debtor.birthDate() == null ? DASH : debtor.birthDate().format(DATE_FORMATTER);
-        String debtorPassport = safe(debtor.passportNumber());
-        String debtorAddress = formatAddress(debtor.registrationAddress());
+        String debtorIntro = safe(debtor.fullName()) + " (" + safeDateText(debtor) + " года рождения в "
+                + safe(debtor.birthPlace()) + ", паспорт: " + safe(debtor.passportNumber())
+                + ", зарегистрирован: " + formatAddress(debtor.registrationAddress())
+                + ", ИНН: " + safe(debtor.inn()) + "; СНИЛС: " + safe(debtor.snils()) + ")";
 
-        List<Creditor> creditors = data.creditors() == null ? List.of() : data.creditors();
-        String creditor1 = creditors.size() > 0 ? safe(creditors.get(0).name()) : DASH;
-        String creditor2 = creditors.size() > 1 ? safe(creditors.get(1).name()) : DASH;
-        String creditor3 = creditors.size() > 2 ? safe(creditors.get(2).name()) : DASH;
+        replaceParagraphStartingWith(document, "Заявитель (должник):", "Заявитель (должник): " + safe(debtor.fullName()));
+        replaceParagraphStartingWith(document, "454014,", formatAddress(debtor.registrationAddress()));
+        replaceParagraphStartingWith(document, "Кредитор1:", "Кредитор1: " + creditorName(creditors, 0));
+        replaceParagraphStartingWith(document, "Кредитор 2:", "Кредитор 2: " + creditorName(creditors, 1));
+        replaceParagraphStartingWith(document, "Кредитор 3:", "Кредитор 3: " + creditorName(creditors, 2));
+        replaceParagraphStartingWith(document, "125466,", DASH);
+        replaceParagraphStartingWith(document, "123290,", DASH);
+        replaceParagraphStartingWith(document, "127018,", DASH);
 
-        replaceTextEverywhere(document, "Захаров Владимир Игоревич", safe(debtor.fullName()));
-        replaceTextEverywhere(document, "Захаров Владимира Игоревича", fio[0] + " " + fio[1] + "а " + fio[2]);
-        replaceTextEverywhere(document, "Захаров В. И.", debtorShortName);
-        replaceTextEverywhere(document, "Захаров В.И.", debtorShortName);
-        replaceTextEverywhere(document, "Захаров", fio[0]);
-        replaceTextEverywhere(document, "17 ноября 1984", debtorBirthDateText);
-        replaceTextEverywhere(document, "паспорт серия 75 10 742228", "паспорт: " + debtorPassport);
-        replaceTextEverywhere(document, "454014, Челябинская обл., Курчатовский р-н г. Челябинск, пр. Победы, д. 330, кв.44", debtorAddress);
-        replaceTextEverywhere(document, "774304839709", safe(debtor.inn()));
-        replaceTextEverywhere(document, "079-529-969 70", safe(debtor.snils()));
-        replaceTextEverywhere(document, "1 248 887,93", totalDebt);
-
-        replaceTextEverywhere(document, "ООО МФК \"ВЭББАНКИР\"", creditor1);
-        replaceTextEverywhere(document, "ООО МКК ТУРБОЗАЙМ", creditor2);
-        replaceTextEverywhere(document, "ООО \"МИГКРЕДИТ\"", creditor3);
-        replaceTextEverywhere(document, "ВЭББАНКИР", creditor1);
-        replaceTextEverywhere(document, "ТУРБОЗАЙМ", creditor2);
-        replaceTextEverywhere(document, "МИГКРЕДИТ", creditor3);
+        replaceParagraphStartingWith(document, "Захаров Владимир Игоревич (", debtorIntro + ", не является индивидуальным предпринимателем.");
+        replaceParagraphStartingWith(document, "Захаров В. В.", shortName(debtor.fullName()) + " имеет не исполненные денежные обязательства в размере " + totalDebt + " рублей.");
+        replaceParagraphRange(
+                document,
+                "Данные обязательства возникли по следующим основаниям:",
+                "Общий размер обязательств Должника перед кредиторами составляет",
+                creditorsDebtBlockLines(creditors, totalDebt)
+        );
+        replaceParagraphStartingWith(document, "У Должника в собственности отсутствует недвижимое имущество", realEstateStatementBlock(data.propertyInfo().realEstateItems()));
+        replaceParagraphStartingWith(document, "У Должника в собственности есть движимое имущество:", vehicleStatementBlock(data.propertyInfo().vehicles()));
+        replaceParagraphStartingWith(document, "Согласно свидетельству о заключении брака", familyBlock(data));
+        replaceParagraphRange(
+                document,
+                "в 2022 году доход",
+                "В трудном денежном положении",
+                employmentAndHardshipLines(data)
+        );
+        replaceParagraphStartingWith(document, "1.  Признать гражданина", "1.  Признать гражданина  "
+                + fullNameGenitive(debtor.fullName()) + " (" + safeDateText(debtor)
+                + " года рождения, ИНН: " + safe(debtor.inn()) + "; СНИЛС: " + safe(debtor.snils())
+                + "), несостоятельным (банкротом), ввести процедуру реализации имущества гражданина.");
+        replaceParagraphStartingWith(document, "3.  Рассмотреть заявление о признании гражданина", "3.  Рассмотреть заявление о признании гражданина "
+                + fullNameGenitive(debtor.fullName()) + " несостоятельным (банкротом) в отсутствие заявителя.");
+        replaceParagraphRange(document,
+                "Список кредиторов и должников гражданина",
+                "Доказательство отправки копии заявления кредиторам",
+                attachmentsStatementLines(data, creditors));
+        replaceParagraphStartingWith(document, "_________________________/", "_________________________/ " + safe(debtor.fullName()));
     }
 
     private void replaceStatementBlock(XWPFDocument document, String marker, String blockText) {
@@ -756,6 +855,156 @@ public class DocumentGenerationService {
             }
             paragraph.createRun().setText(updated);
         }
+    }
+
+    private String safeDateText(Debtor debtor) {
+        return debtor.birthDate() == null ? DASH : debtor.birthDate().format(DATE_FORMATTER);
+    }
+
+    private String creditorName(List<Creditor> creditors, int index) {
+        return index < creditors.size() ? safe(creditors.get(index).name()) : DASH;
+    }
+
+    private List<String> creditorsDebtBlockLines(List<Creditor> creditors, String totalDebt) {
+        List<String> lines = new ArrayList<>();
+        lines.add("Данные обязательства возникли по следующим основаниям:");
+        int rowNumber = 1;
+        for (Creditor creditor : creditors) {
+            String creditorTotal = debtCalculationService.formatAmountRu(debtCalculationService.calculateCreditorTotal(creditor));
+            lines.add(rowNumber + ". Перед кредитором " + safe(creditor.name()) + " общая сумма задолженности в размере " + creditorTotal + " руб.");
+            List<Contract> contracts = Optional.ofNullable(creditor.contracts()).orElse(List.of());
+            for (Contract contract : contracts) {
+                lines.add("- " + contractLabel(contract.contractType()) + " №" + safe(contract.contractNumber())
+                        + " — " + debtCalculationService.formatAmountRu(totalDebtByContract(contract)) + " руб.");
+            }
+            rowNumber++;
+        }
+        lines.add("Общий размер обязательств Должника перед кредиторами составляет " + totalDebt + " руб.");
+        return lines;
+    }
+
+    private List<String> employmentAndHardshipLines(BankruptcyApplicationData data) {
+        List<String> lines = new ArrayList<>();
+        lines.add(employmentBlock(data));
+        lines.add(loanPurposeBlock(data));
+        lines.add(financialHardshipBlock(data));
+        return lines;
+    }
+
+    private List<String> attachmentsStatementLines(BankruptcyApplicationData data, List<Creditor> creditors) {
+        List<String> lines = new ArrayList<>();
+        lines.add("Список кредиторов и должников гражданина (Приложение №1) – 4 листах;");
+        lines.add("Опись имущества гражданина (Приложение №2) – 2 листа;");
+        for (Creditor creditor : creditors) {
+            lines.add("Подтверждение задолженности перед " + safe(creditor.name()) + " – __ лист;");
+        }
+        lines.add("Копия ИНН – 1 лист;");
+        lines.add("Копия страхового свидетельства государственного пенсионного страхования (СНИЛС) – 1 лист;");
+        lines.add("Копия паспорта гражданина РФ – 5 листах;");
+        lines.add("Ответ из ГИБДД о наличии транспортных средств – 1лист;");
+        lines.add("Уведомление из ЕГРН об отсутствии недвижимого имущества – 1 лист;");
+        lines.add("Справка о том, что должник не является индивидуальным предпринимателем – 1 лист;");
+        lines.add("Сведения о состоянии индивидуального лицевого счета застрахованного лица – 4 листах;");
+        lines.add("Сведения об открытых банковских счетах – 1 лист;");
+        lines.add("Сведения об отсутствии задолженности по налогам – 1 лист;");
+        lines.add("Справка о наличии (отсутствии) судимости и (или) факта уголовного преследования либо о прекращении уголовного преследования  – 1 лист;");
+        lines.add("оригинал чек-ордера внесения денежных средств на вознаграждение Арбитражному управляющему – 1 лист;");
+        lines.add("Доказательство отправки копии заявления кредиторам – 5 листах.");
+        return lines;
+    }
+
+    private void replaceParagraphStartingWith(XWPFDocument document, String prefix, String replacement) {
+        for (XWPFParagraph paragraph : document.getParagraphs()) {
+            String text = paragraph.getText();
+            if (text != null && text.startsWith(prefix)) {
+                clearAndSetParagraph(paragraph, replacement);
+                return;
+            }
+        }
+    }
+
+    private void replaceParagraphRange(XWPFDocument document, String startPrefix, String endPrefix, List<String> lines) {
+        List<XWPFParagraph> paragraphs = document.getParagraphs();
+        int start = -1;
+        int end = -1;
+        for (int i = 0; i < paragraphs.size(); i++) {
+            String text = paragraphs.get(i).getText();
+            if (text == null) {
+                continue;
+            }
+            if (start < 0 && text.startsWith(startPrefix)) {
+                start = i;
+            }
+            if (text.startsWith(endPrefix)) {
+                end = i;
+            }
+        }
+        if (start < 0 || end < start) {
+            return;
+        }
+        int lineCount = Math.min(lines.size(), end - start + 1);
+        for (int i = 0; i < lineCount; i++) {
+            clearAndSetParagraph(paragraphs.get(start + i), lines.get(i));
+        }
+        for (int i = start + lineCount; i <= end; i++) {
+            clearAndSetParagraph(paragraphs.get(i), "");
+        }
+    }
+
+    private void clearAndSetParagraph(XWPFParagraph paragraph, String text) {
+        for (int i = paragraph.getRuns().size() - 1; i >= 0; i--) {
+            paragraph.removeRun(i);
+        }
+        paragraph.createRun().setText(text == null ? "" : text);
+    }
+
+    private String contractLabel(String contractType) {
+        if ("microloan".equalsIgnoreCase(contractType)) {
+            return "Договор займа";
+        }
+        if ("card".equalsIgnoreCase(contractType) || "credit_card".equalsIgnoreCase(contractType)) {
+            return "Договор кредитной карты";
+        }
+        return "Кредитный договор";
+    }
+
+    private String vehicleLabelForStatement(Vehicle vehicle) {
+        if (vehicle == null) {
+            return DASH;
+        }
+        return safe(vehicle.brand()) + " " + safe(vehicle.model())
+                + ", " + (vehicle.year() == null ? DASH : vehicle.year()) + " года выпуска, гос.№: "
+                + safe(vehicle.registrationNumber());
+    }
+
+    private String toGenitiveLastName(String lastName) {
+        if (lastName.endsWith("ов") || lastName.endsWith("ев") || lastName.endsWith("ин")) {
+            return lastName + "а";
+        }
+        return lastName;
+    }
+
+    private String toGenitiveName(String firstName) {
+        if (firstName == null || firstName.isBlank() || DASH.equals(firstName)) {
+            return DASH;
+        }
+        if (firstName.endsWith("й")) {
+            return firstName.substring(0, firstName.length() - 1) + "я";
+        }
+        if (firstName.endsWith("ь")) {
+            return firstName.substring(0, firstName.length() - 1) + "я";
+        }
+        return firstName + "а";
+    }
+
+    private String toGenitivePatronymic(String patronymic) {
+        if (patronymic == null || patronymic.isBlank() || DASH.equals(patronymic)) {
+            return DASH;
+        }
+        if (patronymic.endsWith("ич")) {
+            return patronymic + "а";
+        }
+        return patronymic;
     }
 
 }
