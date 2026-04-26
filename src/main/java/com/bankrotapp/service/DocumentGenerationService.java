@@ -128,17 +128,78 @@ public class DocumentGenerationService {
     }
 
     public byte[] generateStatementDocx(BankruptcyApplicationData data) throws IOException {
-        Debtor debtor = data.debtor();
         List<Creditor> creditors = data.creditors() == null ? List.of() : data.creditors();
         String totalDebt = debtCalculationService.formatAmountRu(debtCalculationService.calculateTotalDebt(creditors));
-
-        byte[] rendered = renderTemplate(TEMPLATE_STATEMENT, placeholders(data));
-        try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(rendered));
+        try (XWPFDocument document = buildStatementDocument(data, creditors, totalDebt);
              ByteArrayOutputStream out = new ByteArrayOutputStream()) {
-            replaceStatementDynamicSections(document, data, creditors, totalDebt);
-            document.write(out);
+                                                 document.write(out);
             return out.toByteArray();
         }
+    }
+
+    private XWPFDocument buildStatementDocument(BankruptcyApplicationData data, List<Creditor> creditors, String totalDebt) {
+        Debtor debtor = data.debtor();
+        XWPFDocument document = new XWPFDocument();
+
+        List<String> lines = new ArrayList<>();
+        lines.add("В Арбитражный суд Челябинской области");
+        lines.add("454091, г. Челябинск, ул. Воровского, д.2.");
+        lines.add("");
+        lines.add("Заявитель (должник): " + safe(debtor.fullName()));
+        lines.add(formatAddress(debtor.registrationAddress()));
+        lines.add("");
+        lines.add("Кредитор1: " + creditorName(creditors, 0));
+        lines.add("Кредитор 2: " + creditorName(creditors, 1));
+        lines.add("Кредитор 3: " + creditorName(creditors, 2));
+        lines.add("");
+        lines.add("Заявление");
+        lines.add("о признании несостоятельным (банкротом) должника - физического лица");
+        lines.add("");
+        lines.add(safe(debtor.fullName()) + " (" + safeDateText(debtor) + " года рождения в " + safe(debtor.birthPlace())
+                + ", паспорт: " + safe(debtor.passportNumber()) + ", зарегистрирован: " + formatAddress(debtor.registrationAddress())
+                + ", ИНН: " + safe(debtor.inn()) + "; СНИЛС: " + safe(debtor.snils())
+                + "), не является индивидуальным предпринимателем.");
+        lines.add(shortName(debtor.fullName()) + " имеет не исполненные денежные обязательства в размере " + totalDebt + " рублей.");
+        lines.addAll(creditorsDebtBlockLines(creditors, totalDebt));
+        lines.add(realEstateStatementBlock(data.propertyInfo().realEstateItems()));
+        lines.add(vehicleStatementBlock(data.propertyInfo().vehicles()));
+        lines.add(familyBlock(data));
+        lines.add("Дополнительно сообщаю что:");
+        lines.add("- акционером (участником) акционерных обществ не является;");
+        lines.add("- брачный договор не заключался;");
+        lines.add("- исключительных прав на результаты интеллектуальной деятельности не имеет;");
+        lines.add("- дебиторская задолженность отсутствует;");
+        lines.add(employmentBlock(data));
+        lines.add(loanPurposeBlock(data));
+        lines.add(financialHardshipBlock(data));
+        lines.add("Таким образом, Должник не в состоянии исполнить денежные обязательства и обязанность по уплате обязательных платежей в полном объеме.");
+        lines.add("В соответствии со ст. 213.3 ФЗ «О несостоятельности (банкротстве)» правом на обращение в арбитражный суд с заявлением о признании гражданина банкротом обладают гражданин, конкурсный кредитор, уполномоченный орган.");
+        lines.add("Заявление о признании гражданина банкротом принимается арбитражным судом при условии, что требования к гражданину составляют не менее чем пятьсот тысяч рублей и указанные требования не исполнены в течение трех месяцев.");
+        lines.add("Согласно ст. 213.4 ФЗ «О несостоятельности (банкротстве)» гражданин обязан обратиться в арбитражный суд с заявлением о признании его банкротом.");
+        lines.add("Должник обязуется финансировать процедуру банкротства и оплачивать необходимые расходы по делу.");
+        lines.add("Кроме того, согласно п. 12 Постановления Пленума Верховного Суда РФ от 13.10.2015 N 45 к заявлению должны быть приложены документы, перечисленные в пункте 3 статьи 213.4 Закона о банкротстве.");
+        lines.add("Если при рассмотрении вопроса о принятии заявления должника установлено несоблюдение требований пункта 3 статьи 213.4 Закона о банкротстве, суд оставляет заявление без движения.");
+        lines.add("На основании вышеизложенного, руководствуясь ст. 213.3, 213.4 ФЗ «О несостоятельности (банкротстве)», ст. 125, 126 АПК РФ,");
+        lines.add("прошу суд:");
+        lines.add("1.  Признать гражданина  " + fullNameGenitive(debtor.fullName()) + " (" + safeDateText(debtor)
+                + " года рождения, ИНН: " + safe(debtor.inn()) + "; СНИЛС: " + safe(debtor.snils())
+                + "), несостоятельным (банкротом), ввести процедуру реализации имущества гражданина.");
+        lines.add("2. Утвердить финансового управляющего из числа членов «СРО АУ «Южный Урал» - Ассоциация «Саморегулируемая организация арбитражных управляющих «Южный Урал».");
+        lines.add("3.  Рассмотреть заявление о признании гражданина " + fullNameGenitive(debtor.fullName()) + " несостоятельным (банкротом) в отсутствие заявителя.");
+        lines.add("Приложение документов для Арбитражного суда:");
+        lines.addAll(attachmentsStatementLines(data, creditors));
+        lines.add("");
+        lines.add("_________________________/ " + safe(debtor.fullName()));
+
+        while (lines.size() < 45) {
+            lines.add("");
+        }
+
+        for (String line : lines) {
+            XWPFParagraph paragraph = document.createParagraph();
+            paragraph.createRun().setText(line);
+        }
+        return document;
     }
 
     private byte[] renderTemplate(String templatePath, Map<String, String> placeholders) throws IOException {

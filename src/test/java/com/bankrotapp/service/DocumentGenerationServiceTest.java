@@ -283,6 +283,36 @@ class DocumentGenerationServiceTest {
         }
     }
 
+    @Test
+    void testStatementHeaderBlockReplacedCompletely() throws Exception {
+        String text = extract(service.generateStatementDocx(smirnovClient()));
+        assertContainsWithPreview(text, "Заявитель (должник): Смирнов Андрей Павлович");
+        assertContainsWithPreview(text, "Кредитор1: ПАО ВТБ");
+        assertContainsWithPreview(text, "Кредитор 2: ООО МФК Займер");
+        assertContainsWithPreview(text, "Кредитор 3: ООО МКК Деньги Сразу");
+        assertNotContainsWithPreview(text, "Захаров Владимир Игоревич");
+        assertNotContainsWithPreview(text, "ООО МФК \"ВЭББАНКИР\"");
+        assertNotContainsWithPreview(text, "ООО МКК ТУРБОЗАЙМ");
+        assertNotContainsWithPreview(text, "ООО \"МИГКРЕДИТ\"");
+    }
+
+    @Test
+    void testDebtorIntroBlockReplacedCompletely() throws Exception {
+        String text = extract(service.generateStatementDocx(smirnovClient()));
+        assertContainsWithPreview(text, "Смирнов Андрей Павлович");
+        assertNotContainsWithPreview(text, "паспорт серия 75 10 742228");
+        assertNotContainsWithPreview(text, "454014, Челябинская обл., Курчатовский р-н г. Челябинск, пр. Победы, д. 330, кв.44");
+        assertNotContainsWithPreview(text, "744713194008");
+        assertNotContainsWithPreview(text, "113-764-260-43");
+    }
+
+    @Test
+    void testStatementDoesNotContainWordComments() throws Exception {
+        String text = extract(service.generateStatementDocx(smirnovClient()));
+        assertNotContainsWithPreview(text, "Comment by");
+        assertNotContainsWithPreview(text, "Опер1");
+    }
+
     private BankruptcyApplicationData ivanovClient() {
         Address address = new Address("Россия", "г. Москва", "Москва", "Ленинская Слобода", "19", "12", "115280");
         Debtor debtor = new Debtor(
@@ -429,11 +459,28 @@ class DocumentGenerationServiceTest {
     }
 
     private void assertContainsWithPreview(String text, String expected) {
-        assertTrue(text.contains(expected), "Ожидалось вхождение: " + expected + ". Фрагмент заявления:\n" + preview(text));
+        String normalizedText = normalizeText(text);
+        String normalizedExpected = normalizeText(expected);
+        assertTrue(normalizedText.contains(normalizedExpected),
+                "Ожидалось вхождение: " + expected + ". Фрагмент заявления:\n" + preview(text));
     }
 
     private void assertNotContainsWithPreview(String text, String unexpected) {
-        assertFalse(text.contains(unexpected), "Не ожидалось вхождение: " + unexpected + ". Фрагмент заявления:\n" + preview(text));
+        String normalizedText = normalizeText(text);
+        String normalizedUnexpected = normalizeText(unexpected);
+        assertFalse(normalizedText.contains(normalizedUnexpected),
+                "Не ожидалось вхождение: " + unexpected + ". Фрагмент заявления:\n" + preview(text));
+    }
+
+    private String normalizeText(String text) {
+        if (text == null) {
+            return "";
+        }
+        return text
+                .replace('\u00A0', ' ')
+                .replace('\u202F', ' ')
+                .replaceAll("\\s+", " ")
+                .trim();
     }
 
     private String preview(String text) {
