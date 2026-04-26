@@ -132,7 +132,7 @@ public class DocumentGenerationService {
         String totalDebt = debtCalculationService.formatAmountRu(debtCalculationService.calculateTotalDebt(creditors));
         try (XWPFDocument document = buildStatementDocument(data, creditors, totalDebt);
              ByteArrayOutputStream out = new ByteArrayOutputStream()) {
-            document.write(out);
+                                                 document.write(out);
             return out.toByteArray();
         }
     }
