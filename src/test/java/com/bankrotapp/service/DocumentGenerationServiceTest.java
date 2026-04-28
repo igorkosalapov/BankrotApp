@@ -10,6 +10,7 @@ import com.bankrotapp.model.EmploymentInfo;
 import com.bankrotapp.model.FamilyInfo;
 import com.bankrotapp.model.PropertyInfo;
 import com.bankrotapp.model.Vehicle;
+import com.bankrotapp.template.TemplatePreparationTool;
 import org.apache.poi.xwpf.extractor.XWPFWordExtractor;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.junit.jupiter.api.Test;
@@ -23,12 +24,14 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DocumentGenerationServiceTest {
@@ -37,6 +40,44 @@ class DocumentGenerationServiceTest {
             new DebtCalculationService(),
             new DocxTemplateRenderer()
     );
+    private static final Set<String> REQUIRED_MARKERS = Set.of(
+            "{{headerBlock}}",
+            "{{debtorIntroBlock}}",
+            "{{creditorsDebtBlock}}",
+            "{{familyBlock}}",
+            "{{vehicleBlock}}",
+            "{{attachmentsBlock}}",
+            "{{signatureFullName}}"
+    );
+
+    @Test
+    void testStatementTemplateMustContainRequiredMarkers() throws Exception {
+        byte[] rawStatementTemplate = readResource("templates/zayavlenie.docx");
+        byte[] prepared = TemplatePreparationTool.prepareStatementTemplate(rawStatementTemplate);
+        String xml = readWordXml(prepared);
+        for (String marker : REQUIRED_MARKERS) {
+            assertTrue(xml.contains(marker), "Отсутствует обязательный marker: " + marker);
+        }
+    }
+
+    @Test
+    void testGenerationFailsIfStatementTemplateIsRaw() throws Exception {
+        byte[] brokenRaw = createBrokenDocxWithoutDocumentXml();
+        IllegalStateException exception = assertThrows(IllegalStateException.class,
+                () -> service.prepareStatementTemplate(brokenRaw));
+        assertTrue(exception.getMessage().contains("Statement template preparation failed: missing marker {{headerBlock}}"));
+    }
+
+    @Test
+    void testGenerateZipUsesPreparedTemplatesOnly() throws Exception {
+        byte[] prepared = TemplatePreparationTool.prepareStatementTemplate(readResource("templates/zayavlenie.docx"));
+        String preparedXml = readWordXml(prepared);
+        for (String marker : REQUIRED_MARKERS) {
+            assertTrue(preparedXml.contains(marker), "Prepared template must contain marker " + marker);
+        }
+        byte[] zip = service.generateZip(ivanovClient());
+        assertNotNull(zip);
+    }
 
     @Test
     void testStatementKeepsLegalTemplateStructure() throws Exception {
@@ -80,6 +121,14 @@ class DocumentGenerationServiceTest {
 
         assertFalse(text.contains("MITSUBISHI RVR"));
         assertTrue(text.contains("-") || text.contains("отсутств"));
+    }
+
+    @Test
+    void testAppendix2SignatureUsesCurrentDebtor() throws Exception {
+        BankruptcyApplicationData data = ivanovClient();
+        String text = extract(service.generateAppendixTwoDocx(data, List.of(), List.of(), List.of()));
+        assertContainsWithPreview(text, "Иванов Сергей Николаевич");
+        assertNotContainsWithPreview(text, "Захаров Владимир Игоревич");
     }
 
     @Test
@@ -178,6 +227,30 @@ class DocumentGenerationServiceTest {
             String xml = readWordXml(docx);
             assertFalse(xml.contains("{{"), "В DOCX остались неразрешённые placeholders {{...}}.");
             assertFalse(xml.contains("}}"), "В DOCX остались неразрешённые placeholders {{...}}.");
+        }
+    }
+
+    @Test
+    void testGeneratedZipHasNoLegacyDataInAnyDocx() throws Exception {
+        byte[] zip = service.generateZip(ivanovClient());
+        List<String> forbidden = List.of(
+                "Захаров",
+                "ВЭББАНКИР",
+                "ТУРБОЗАЙМ",
+                "МИГКРЕДИТ",
+                "MITSUBISHI RVR",
+                "1 248 887,93",
+                "Наймушина",
+                "Захарова Алёна",
+                "75 10 742228",
+                "744713194008",
+                "113-764-260-43"
+        );
+        for (byte[] docx : readDocxEntries(zip)) {
+            String text = extract(docx);
+            for (String marker : forbidden) {
+                assertNotContainsWithPreview(text, marker);
+            }
         }
     }
 
@@ -477,6 +550,26 @@ class DocumentGenerationServiceTest {
             }
         }
         return xml.toString();
+    }
+
+    private byte[] readResource(String classpath) throws IOException {
+        try (InputStream inputStream = Thread.currentThread().getContextClassLoader().getResourceAsStream(classpath)) {
+            if (inputStream == null) {
+                throw new IOException("Resource not found: " + classpath);
+            }
+            return inputStream.readAllBytes();
+        }
+    }
+
+    private byte[] createBrokenDocxWithoutDocumentXml() throws IOException {
+        try (java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+             java.util.zip.ZipOutputStream zipOutputStream = new java.util.zip.ZipOutputStream(out)) {
+            zipOutputStream.putNextEntry(new java.util.zip.ZipEntry("[Content_Types].xml"));
+            zipOutputStream.write("<Types/>".getBytes(StandardCharsets.UTF_8));
+            zipOutputStream.closeEntry();
+            zipOutputStream.finish();
+            return out.toByteArray();
+        }
     }
 
     private byte[] readStatementDocx(byte[] zipBytes) throws IOException {

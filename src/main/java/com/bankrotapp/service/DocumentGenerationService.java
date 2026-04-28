@@ -9,6 +9,7 @@ import com.bankrotapp.model.Creditor;
 import com.bankrotapp.model.Debtor;
 import com.bankrotapp.model.RealEstateItem;
 import com.bankrotapp.model.Vehicle;
+import com.bankrotapp.template.TemplatePreparationTool;
 import org.apache.poi.xwpf.extractor.XWPFWordExtractor;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.apache.poi.xwpf.usermodel.XWPFFooter;
@@ -56,13 +57,27 @@ public class DocumentGenerationService {
             "word/commentsIds.xml",
             "word/people.xml"
     );
+    private static final List<String> REQUIRED_STATEMENT_MARKERS = List.of(
+            "{{headerBlock}}",
+            "{{debtorIntroBlock}}",
+            "{{creditorsDebtBlock}}",
+            "{{familyBlock}}",
+            "{{vehicleBlock}}",
+            "{{attachmentsBlock}}",
+            "{{signatureFullName}}"
+    );
     private static final List<String> TEMPLATE_ARTIFACTS_FOR_IVANOV = List.of(
             "Захаров",
             "ВЭББАНКИР",
             "ТУРБОЗАЙМ",
             "МИГКРЕДИТ",
             "MITSUBISHI RVR",
-            "1 248 887,93"
+            "1 248 887,93",
+            "Наймушина",
+            "Захарова Алёна",
+            "75 10 742228",
+            "744713194008",
+            "113-764-260-43"
     );
 
     private final DebtCalculationService debtCalculationService;
@@ -112,7 +127,7 @@ public class DocumentGenerationService {
             scrubLegacyTemplateArtifacts(document, data.debtor());
             addDebtorFullNameLine(document, data.debtor().fullName());
             document.write(out);
-            return out.toByteArray();
+            return scrubLegacyRawXml(out.toByteArray(), data.debtor());
         }
     }
 
@@ -131,21 +146,26 @@ public class DocumentGenerationService {
             scrubLegacyTemplateArtifacts(document, data.debtor());
             addDebtorFullNameLine(document, data.debtor().fullName());
             document.write(out);
-            return out.toByteArray();
+            return scrubLegacyRawXml(out.toByteArray(), data.debtor());
         }
     }
 
     public byte[] generateStatementDocx(BankruptcyApplicationData data) throws IOException {
         List<Creditor> creditors = data.creditors() == null ? List.of() : data.creditors();
         String totalDebt = debtCalculationService.formatAmountRu(debtCalculationService.calculateTotalDebt(creditors));
-        try (InputStream templateStream = new ClassPathResource(TEMPLATE_STATEMENT).getInputStream();
-             XWPFDocument document = new XWPFDocument(templateStream);
+        byte[] templateBytes;
+        try (InputStream templateStream = new ClassPathResource(TEMPLATE_STATEMENT).getInputStream()) {
+            templateBytes = templateStream.readAllBytes();
+        }
+        byte[] preparedTemplateBytes = prepareStatementTemplate(templateBytes);
+        try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(preparedTemplateBytes));
              ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             replaceStatementDynamicSections(document, data, creditors, totalDebt);
             replaceStatementMarkers(document, data, creditors, totalDebt);
             scrubLegacyTemplateArtifacts(document, data.debtor());
             document.write(out);
-            return removeWordComments(out.toByteArray());
+            byte[] withoutComments = removeWordComments(out.toByteArray());
+            return scrubLegacyRawXml(withoutComments, data.debtor());
         }
     }
 
@@ -676,6 +696,21 @@ public class DocumentGenerationService {
         }
     }
 
+    byte[] prepareStatementTemplate(byte[] rawTemplateBytes) throws IOException {
+        byte[] prepared = TemplatePreparationTool.prepareStatementTemplate(rawTemplateBytes);
+        assertStatementTemplatePrepared(prepared, "Statement template preparation failed: missing marker ");
+        return prepared;
+    }
+
+    void assertStatementTemplatePrepared(byte[] templateBytes, String prefix) throws IOException {
+        String xml = readWordXml(templateBytes);
+        for (String marker : REQUIRED_STATEMENT_MARKERS) {
+            if (!xml.contains(marker)) {
+                throw new IllegalStateException(prefix + marker);
+            }
+        }
+    }
+
     private void replaceLegacyMarkersInTables(List<XWPFTable> tables, String fullName, String lastName) {
         for (XWPFTable table : tables) {
             for (XWPFTableRow row : table.getRows()) {
@@ -989,6 +1024,57 @@ public class DocumentGenerationService {
             return "";
         }
         return text.trim().replaceAll("\\.+$", "");
+    }
+
+    private byte[] scrubLegacyRawXml(byte[] docxBytes, Debtor debtor) throws IOException {
+        String[] fioParts = splitFio(debtor.fullName());
+        String fullName = safe(debtor.fullName());
+        String shortName = shortName(fullName);
+        String lastName = fioParts[0];
+
+        try (ZipInputStream zipInputStream = new ZipInputStream(new ByteArrayInputStream(docxBytes), StandardCharsets.UTF_8);
+             ByteArrayOutputStream out = new ByteArrayOutputStream();
+             ZipOutputStream zipOutputStream = new ZipOutputStream(out, StandardCharsets.UTF_8)) {
+            ZipEntry entry;
+            while ((entry = zipInputStream.getNextEntry()) != null) {
+                byte[] content = zipInputStream.readAllBytes();
+                if (entry.getName().startsWith("word/") && entry.getName().endsWith(".xml")) {
+                    String xml = new String(content, StandardCharsets.UTF_8)
+                            .replace("Захаров Владимир Игоревич", fullName)
+                            .replace("Захаров В. И.", shortName)
+                            .replace("Захаров", lastName)
+                            .replace("ВЭББАНКИР", "")
+                            .replace("ТУРБОЗАЙМ", "")
+                            .replace("МИГКРЕДИТ", "")
+                            .replace("MITSUBISHI RVR", "")
+                            .replace("1 248 887,93", "")
+                            .replace("Наймушина", "")
+                            .replace("Захарова Алёна", "")
+                            .replace("75 10 742228", "")
+                            .replace("744713194008", "")
+                            .replace("113-764-260-43", "");
+                    content = xml.getBytes(StandardCharsets.UTF_8);
+                }
+                zipOutputStream.putNextEntry(new ZipEntry(entry.getName()));
+                zipOutputStream.write(content);
+                zipOutputStream.closeEntry();
+            }
+            zipOutputStream.finish();
+            return out.toByteArray();
+        }
+    }
+
+    private String readWordXml(byte[] docxBytes) throws IOException {
+        StringBuilder xml = new StringBuilder();
+        try (ZipInputStream zipInputStream = new ZipInputStream(new ByteArrayInputStream(docxBytes), StandardCharsets.UTF_8)) {
+            ZipEntry entry;
+            while ((entry = zipInputStream.getNextEntry()) != null) {
+                if (entry.getName().startsWith("word/") && entry.getName().endsWith(".xml")) {
+                    xml.append(new String(zipInputStream.readAllBytes(), StandardCharsets.UTF_8));
+                }
+            }
+        }
+        return xml.toString();
     }
 
     private byte[] removeWordComments(byte[] docxBytes) throws IOException {
