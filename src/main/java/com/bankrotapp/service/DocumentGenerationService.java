@@ -61,10 +61,27 @@ public class DocumentGenerationService {
             "{{headerBlock}}",
             "{{debtorIntroBlock}}",
             "{{creditorsDebtBlock}}",
+            "{{employmentBlock}}",
             "{{familyBlock}}",
             "{{vehicleBlock}}",
             "{{attachmentsBlock}}",
             "{{signatureFullName}}"
+    );
+    private static final List<String> STRICT_LEGACY_MARKERS = List.of(
+            "Захаров",
+            "ВЭББАНКИР",
+            "ТУРБОЗАЙМ",
+            "МИГКРЕДИТ",
+            "MITSUBISHI RVR",
+            "Наймушина",
+            "Захарова Алёна",
+            "1 248 887,93",
+            "75 10 742228",
+            "744713194008",
+            "113-764-260-43",
+            "пр. Победы",
+            "Курчатовский",
+            "Смолино"
     );
     private static final List<String> TEMPLATE_ARTIFACTS_FOR_IVANOV = List.of(
             "Захаров",
@@ -160,12 +177,12 @@ public class DocumentGenerationService {
         byte[] preparedTemplateBytes = prepareStatementTemplate(templateBytes);
         try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(preparedTemplateBytes));
              ByteArrayOutputStream out = new ByteArrayOutputStream()) {
-            replaceStatementDynamicSections(document, data, creditors, totalDebt);
             replaceStatementMarkers(document, data, creditors, totalDebt);
-            scrubLegacyTemplateArtifacts(document, data.debtor());
             document.write(out);
             byte[] withoutComments = removeWordComments(out.toByteArray());
-            return scrubLegacyRawXml(withoutComments, data.debtor());
+            byte[] sanitized = scrubLegacyRawXml(withoutComments, data.debtor());
+            assertNoLegacyData(sanitized);
+            return sanitized;
         }
     }
 
@@ -708,6 +725,19 @@ public class DocumentGenerationService {
             if (!xml.contains(marker)) {
                 throw new IllegalStateException(prefix + marker);
             }
+        }
+    }
+
+    void assertNoLegacyData(byte[] docxBytes) throws IOException {
+        String xml = readWordXml(docxBytes);
+        List<String> found = new ArrayList<>();
+        for (String marker : STRICT_LEGACY_MARKERS) {
+            if (xml.contains(marker)) {
+                found.add(marker);
+            }
+        }
+        if (!found.isEmpty()) {
+            throw new IllegalStateException("Generated statement contains legacy data: " + found);
         }
     }
 

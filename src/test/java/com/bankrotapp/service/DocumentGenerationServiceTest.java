@@ -44,6 +44,7 @@ class DocumentGenerationServiceTest {
             "{{headerBlock}}",
             "{{debtorIntroBlock}}",
             "{{creditorsDebtBlock}}",
+            "{{employmentBlock}}",
             "{{familyBlock}}",
             "{{vehicleBlock}}",
             "{{attachmentsBlock}}",
@@ -244,7 +245,10 @@ class DocumentGenerationServiceTest {
                 "Захарова Алёна",
                 "75 10 742228",
                 "744713194008",
-                "113-764-260-43"
+                "113-764-260-43",
+                "пр. Победы",
+                "Курчатовский",
+                "Смолино"
         );
         for (byte[] docx : readDocxEntries(zip)) {
             String text = extract(docx);
@@ -252,6 +256,69 @@ class DocumentGenerationServiceTest {
                 assertNotContainsWithPreview(text, marker);
             }
         }
+    }
+
+    @Test
+    void testStatementGenerationFailsIfLegacyDataRemains() throws Exception {
+        byte[] legacyDocx = createDocxWithStatementText("Захаров Владимир Игоревич");
+        IllegalStateException exception = assertThrows(IllegalStateException.class,
+                () -> service.assertNoLegacyData(legacyDocx));
+        assertTrue(exception.getMessage().contains("Generated statement contains legacy data"));
+    }
+
+    @Test
+    void testGeneratedStatementHasNoLegacyData() throws Exception {
+        String text = extract(service.generateStatementDocx(ivanovClient()));
+        List<String> forbidden = List.of(
+                "Захаров",
+                "ВЭББАНКИР",
+                "ТУРБОЗАЙМ",
+                "МИГКРЕДИТ",
+                "MITSUBISHI RVR",
+                "Наймушина",
+                "Захарова Алёна",
+                "1 248 887,93",
+                "75 10 742228",
+                "744713194008",
+                "113-764-260-43",
+                "пр. Победы",
+                "Курчатовский",
+                "Смолино"
+        );
+        for (String marker : forbidden) {
+            assertNotContainsWithPreview(text, marker);
+        }
+    }
+
+    @Test
+    void testGeneratedZipStatementHasNoLegacyData() throws Exception {
+        byte[] zip = service.generateZip(ivanovClient());
+        byte[] statementDocx = readStatementDocx(zip);
+        service.assertNoLegacyData(statementDocx);
+    }
+
+    @Test
+    void testRequiredStatementMarkersExistBeforeRendering() throws Exception {
+        byte[] prepared = TemplatePreparationTool.prepareStatementTemplate(readResource("templates/zayavlenie.docx"));
+        String xml = readWordXml(prepared);
+        for (String marker : REQUIRED_MARKERS) {
+            assertTrue(xml.contains(marker));
+        }
+    }
+
+    @Test
+    void testStatementPreservesTemplateStructure() throws Exception {
+        byte[] statementBytes = service.generateStatementDocx(ivanovClient());
+        String text = extract(statementBytes);
+        assertTrue(containsZipEntry(statementBytes, "word/styles.xml"));
+        assertTrue(containsZipEntry(statementBytes, "word/numbering.xml"));
+        assertTrue(containsZipEntry(statementBytes, "word/theme/theme1.xml"));
+        assertTrue(containsZipEntry(statementBytes, "word/fontTable.xml"));
+        assertTrue(tableCount(statementBytes) > 0);
+        assertContainsWithPreview(text, "В соответствии со ст. 213.3");
+        assertContainsWithPreview(text, "Согласно ст. 213.4");
+        assertContainsWithPreview(text, "прошу суд");
+        assertContainsWithPreview(text, "Приложение документов для Арбитражного суда");
     }
 
     @Test
@@ -500,6 +567,12 @@ class DocumentGenerationServiceTest {
         }
     }
 
+    private int tableCount(byte[] bytes) throws Exception {
+        try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(bytes))) {
+            return document.getTables().size();
+        }
+    }
+
     private boolean containsZipEntry(byte[] docxBytes, String entryName) throws IOException {
         try (ZipInputStream zipInputStream = new ZipInputStream(new ByteArrayInputStream(docxBytes), StandardCharsets.UTF_8)) {
             ZipEntry entry;
@@ -568,6 +641,15 @@ class DocumentGenerationServiceTest {
             zipOutputStream.write("<Types/>".getBytes(StandardCharsets.UTF_8));
             zipOutputStream.closeEntry();
             zipOutputStream.finish();
+            return out.toByteArray();
+        }
+    }
+
+    private byte[] createDocxWithStatementText(String text) throws IOException {
+        try (org.apache.poi.xwpf.usermodel.XWPFDocument document = new org.apache.poi.xwpf.usermodel.XWPFDocument();
+             java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream()) {
+            document.createParagraph().createRun().setText(text);
+            document.write(out);
             return out.toByteArray();
         }
     }

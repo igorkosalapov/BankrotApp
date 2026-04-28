@@ -23,6 +23,7 @@ public final class TemplatePreparationTool {
             "{{headerBlock}}",
             "{{debtorIntroBlock}}",
             "{{creditorsDebtBlock}}",
+            "{{employmentBlock}}",
             "{{familyBlock}}",
             "{{vehicleBlock}}",
             "{{attachmentsBlock}}",
