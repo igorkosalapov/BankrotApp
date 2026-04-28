@@ -2,10 +2,13 @@ package com.bankrotapp.controller;
 
 import com.bankrotapp.model.Address;
 import com.bankrotapp.model.BankruptcyApplicationData;
+import com.bankrotapp.model.Child;
 import com.bankrotapp.model.Contract;
 import com.bankrotapp.model.Creditor;
 import com.bankrotapp.model.Debtor;
 import com.bankrotapp.model.EmploymentInfo;
+import com.bankrotapp.model.FamilyInfo;
+import com.bankrotapp.model.PreviewFormData;
 import com.bankrotapp.model.PropertyInfo;
 import com.bankrotapp.model.RealEstateItem;
 import com.bankrotapp.model.Vehicle;
@@ -16,8 +19,8 @@ import jakarta.servlet.http.HttpSession;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
 
 import java.math.BigDecimal;
@@ -25,9 +28,7 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 
 @Controller
 public class WebPreviewController {
@@ -36,14 +37,16 @@ public class WebPreviewController {
 
     private final DebtCalculationService debtCalculationService;
     private final OpenAiTextBlockService openAiTextBlockService;
+    private final PreviewInputParser previewInputParser;
 
     public WebPreviewController(DebtCalculationService debtCalculationService,
                                 OpenAiTextBlockService openAiTextBlockService) {
         this.debtCalculationService = debtCalculationService;
         this.openAiTextBlockService = openAiTextBlockService;
+        this.previewInputParser = new PreviewInputParser();
     }
 
-    @GetMapping(value = "/", produces = MediaType.TEXT_HTML_VALUE)
+    @GetMapping(value = "/", produces = "text/html;charset=UTF-8")
     @ResponseBody
     public String formPage() {
         return """
@@ -53,71 +56,102 @@ public class WebPreviewController {
                     <meta charset="UTF-8">
                     <title>BankrotApp — Ввод данных</title>
                     <style>
-                        body { font-family: Arial, sans-serif; margin: 2rem; max-width: 980px; }
-                        label { display: block; margin-top: 1rem; font-weight: 600; }
-                        input, textarea { width: 100%; margin-top: .4rem; padding: .6rem; box-sizing: border-box; }
-                        textarea { min-height: 120px; }
+                        body { font-family: Arial, sans-serif; margin: 2rem; max-width: 1080px; }
+                        label { display: block; margin-top: .7rem; font-weight: 600; }
+                        input, textarea { width: 100%; margin-top: .2rem; padding: .6rem; box-sizing: border-box; }
+                        textarea { min-height: 90px; }
                         button { margin-top: 1.2rem; padding: .7rem 1.1rem; cursor: pointer; }
                         .hint { color: #555; font-size: .9rem; margin-top: .2rem; }
+                        fieldset { margin-top: 1rem; border: 1px solid #ddd; border-radius: 8px; }
+                        legend { font-weight: 700; }
                     </style>
                 </head>
                 <body>
                     <h1>Проверка ввода данных</h1>
-                    <p>Этап предпросмотра: вводим данные и проверяем, как они отображаются.</p>
-
                     <form action="/preview" method="post">
-                        <label for="fullName">ФИО должника</label>
-                        <input id="fullName" name="fullName" placeholder="Иванов Иван Иванович" required>
+                        <fieldset><legend>1. Данные должника</legend>
+                            <label>Фамилия<input name="lastName" required></label>
+                            <label>Имя<input name="firstName" required></label>
+                            <label>Отчество<input name="middleName"></label>
+                            <label>Дата рождения (дд.мм.гггг)<input name="birthDate"></label>
+                            <label>Место рождения<input name="birthPlace"></label>
+                            <label>СНИЛС<input name="snils"></label>
+                            <label>ИНН<input name="inn"></label>
+                            <label>Паспорт: серия<input name="passportSeries"></label>
+                            <label>Паспорт: номер<input name="passportNumber"></label>
+                            <label>Кем выдан<input name="passportIssuedBy"></label>
+                            <label>Дата выдачи<input name="passportIssueDate"></label>
+                            <label>Код подразделения<input name="passportDivisionCode"></label>
+                            <label>Индекс<input name="registrationPostalCode"></label>
+                            <label>Регион<input name="registrationRegion"></label>
+                            <label>Район<input name="registrationDistrict"></label>
+                            <label>Город<input name="registrationCity"></label>
+                            <label>Населенный пункт<input name="registrationSettlement"></label>
+                            <label>Улица<input name="registrationStreet"></label>
+                            <label>Дом<input name="registrationHouse"></label>
+                            <label>Корпус<input name="registrationBuilding"></label>
+                            <label>Квартира<input name="registrationApartment"></label>
+                            <label>Полный адрес (опционально)<input name="registrationFullAddress"></label>
+                        </fieldset>
 
-                        <label for="creditorLines">Кредиторы / договоры / суммы</label>
-                        <textarea id="creditorLines" name="creditorLines" placeholder="Банк А|Кредитный договор №123|150000\nМФО Б|Договор займа №77|25000" required></textarea>
-                        <div class="hint">Формат: <code>Кредитор|Договор|Сумма</code>. Одна строка — один договор.</div>
+                        <fieldset><legend>2. Кредиторы</legend>
+                            <textarea name="creditorLines" required placeholder="Кредитор|Адрес кредитора|Тип договора|Номер договора|Дата договора|Сумма|Подтверждающий документ|Листов"></textarea>
+                            <div class="hint">Поддерживается и старый формат: Кредитор|Договор|Сумма.</div>
+                        </fieldset>
 
-                        <label for="maritalStatus">Семейное положение (SINGLE / MARRIED / DIVORCED / WIDOWED)</label>
-                        <input id="maritalStatus" name="maritalStatus" placeholder="SINGLE">
+                        <fieldset><legend>3–4. Семья и дети</legend>
+                            <label>Семейное положение<input name="maritalStatus" placeholder="SINGLE / MARRIED / DIVORCED / WIDOWED"></label>
+                            <label>ФИО супруга/бывшего супруга<input name="spouseName"></label>
+                            <label>Дата брака<input name="marriageDate"></label>
+                            <label>Свидетельство о браке<input name="marriageCertificate"></label>
+                            <label>Дата расторжения<input name="divorceDate"></label>
+                            <label>Свидетельство о расторжении<input name="divorceCertificate"></label>
+                            <label>Дата смерти супруга<input name="spouseDeathDate"></label>
+                            <label>Свидетельство о смерти<input name="deathCertificate"></label>
+                            <label>Дети (ФИО|дата рождения|свидетельство о рождении)
+                                <textarea name="childrenLines"></textarea>
+                            </label>
+                        </fieldset>
 
-                        <label for="spouseName">ФИО супруга(и)</label>
-                        <input id="spouseName" name="spouseName" placeholder="Петрова Анна Александровна">
+                        <fieldset><legend>5. Недвижимость</legend>
+                            <textarea name="realEstateLines" placeholder="Тип|адрес|вид собственности|площадь|основание приобретения|стоимость|залог"></textarea>
+                        </fieldset>
 
-                        <label for="marriageDate">Дата брака (дд.мм.гггг)</label>
-                        <input id="marriageDate" name="marriageDate" placeholder="01.06.2015">
+                        <fieldset><legend>6. Транспорт</legend>
+                            <textarea name="vehicleLines" placeholder="Тип|марка|модель|госномер|год|VIN/кузов|номер двигателя|вид собственности|место хранения|стоимость|залог"></textarea>
+                        </fieldset>
 
-                        <label for="marriageCertificate">Свидетельство о браке</label>
-                        <input id="marriageCertificate" name="marriageCertificate" placeholder="IV-МЮ №123456">
+                        <fieldset><legend>7. Работа и доходы</legend>
+                            <label>employmentStatus<input name="employmentStatus" placeholder="EMPLOYED / UNEMPLOYED / INFORMAL_WORK / PENSIONER / OTHER"></label>
+                            <label>Работодатель<input name="employerName"></label>
+                            <label>Должность<input name="position"></label>
+                            <label>Ежемесячный доход<input name="monthlyIncome"></label>
+                            <label>Доход за 2022<input name="income2022"></label>
+                            <label>Доход за 2023<input name="income2023"></label>
+                            <label>Доход за 2024<input name="income2024"></label>
+                            <label>Доход за 2025<input name="income2025"></label>
+                            <label>Описание предыдущей работы/подработок<textarea name="previousWorkDescription"></textarea></label>
+                        </fieldset>
 
-                        <label for="divorceDate">Дата расторжения брака (дд.мм.гггг)</label>
-                        <input id="divorceDate" name="divorceDate" placeholder="14.02.2020">
+                        <fieldset><legend>8. Справки и документы</legend>
+                            <label>Номер и дата справки ЕГРИП<input name="egripCertificate"></label>
+                            <label>Номер и дата ответа ГИБДД<input name="gibddResponse"></label>
+                            <label>Номер и дата выписки/уведомления ЕГРН<input name="egrnExtract"></label>
+                            <label>Листов паспорта<input name="passportPages"></label>
+                            <label>Листов ИНН<input name="innPages"></label>
+                            <label>Листов СНИЛС<input name="snilsPages"></label>
+                            <label>Листов СЗИ-ИЛС<input name="sziIlsPages"></label>
+                            <label>Листов сведений о счетах<input name="bankAccountsPages"></label>
+                            <label>Листов справки налоговой<input name="taxCertificatePages"></label>
+                            <label>Листов справки о судимости<input name="criminalRecordPages"></label>
+                            <label>Листов доказательств отправки кредиторам<input name="creditorPostingProofPages"></label>
+                        </fieldset>
 
-                        <label for="divorceCertificate">Свидетельство о расторжении брака</label>
-                        <input id="divorceCertificate" name="divorceCertificate" placeholder="II-БР №654321">
-
-                        <label for="spouseDeathDate">Дата смерти супруга(и) (дд.мм.гггг)</label>
-                        <input id="spouseDeathDate" name="spouseDeathDate" placeholder="21.03.2021">
-
-                        <label for="deathCertificate">Свидетельство о смерти</label>
-                        <input id="deathCertificate" name="deathCertificate" placeholder="III-СМ №777888">
-
-                        <label for="childrenLines">Дети (ФИО|дата рождения|свидетельство)</label>
-                        <textarea id="childrenLines" name="childrenLines" placeholder="Иванов Петр Иванович|11.02.2014|I-АБ №123456"></textarea>
-
-                        <label for="realEstateLines">Недвижимость (тип|описание)</label>
-                        <textarea id="realEstateLines" name="realEstateLines" placeholder="Квартира|г. Москва, ул. Тверская, д. 10, кв. 15"></textarea>
-
-                        <label for="vehicleLines">Транспорт (тип|марка|модель|госномер|год)</label>
-                        <textarea id="vehicleLines" name="vehicleLines" placeholder="Легковой автомобиль|Hyundai|Solaris|А111АА77|2017"></textarea>
-
-                        <label for="employmentStatus">Работа (EMPLOYED / UNEMPLOYED)</label>
-                        <input id="employmentStatus" name="employmentStatus" placeholder="EMPLOYED">
-
-                        <h2>Вспомогательные текстовые блоки (OpenAI только для этих полей)</h2>
-                        <label for="hardshipReasonInput">Причина тяжелого финансового положения</label>
-                        <textarea id="hardshipReasonInput" name="hardshipReasonInput" placeholder="Например: после сокращения дохода и роста обязательных платежей стало невозможно исполнять обязательства в полном объеме."></textarea>
-
-                        <label for="employmentIncomeInput">Описание работы/доходов</label>
-                        <textarea id="employmentIncomeInput" name="employmentIncomeInput" placeholder="Например: официально трудоустроен, получает ежемесячный доход, которого недостаточно для полного обслуживания долгов."></textarea>
-
-                        <label for="loanFundsUsageInput">Описание использования заемных средств</label>
-                        <textarea id="loanFundsUsageInput" name="loanFundsUsageInput" placeholder="Например: средства использованы на повседневные расходы семьи и исполнение первоочередных обязательств."></textarea>
+                        <fieldset><legend>9. Вспомогательные текстовые блоки</legend>
+                            <label>Причина тяжелого финансового положения<textarea name="hardshipReasonInput"></textarea></label>
+                            <label>Описание работы/доходов<textarea name="employmentIncomeInput"></textarea></label>
+                            <label>Описание использования заемных средств<textarea name="loanFundsUsageInput"></textarea></label>
+                        </fieldset>
 
                         <button type="submit">Показать предпросмотр</button>
                     </form>
@@ -126,399 +160,207 @@ public class WebPreviewController {
                 """;
     }
 
-    @PostMapping(value = "/preview", consumes = MediaType.APPLICATION_FORM_URLENCODED_VALUE, produces = MediaType.TEXT_HTML_VALUE)
+    @PostMapping(value = "/preview", consumes = MediaType.APPLICATION_FORM_URLENCODED_VALUE, produces = "text/html;charset=UTF-8")
     @ResponseBody
-    public String previewPage(@RequestParam String fullName,
-                              @RequestParam String creditorLines,
-                              @RequestParam(required = false, defaultValue = "SINGLE") String maritalStatus,
-                              @RequestParam(required = false, defaultValue = "") String spouseName,
-                              @RequestParam(required = false, defaultValue = "") String marriageDate,
-                              @RequestParam(required = false, defaultValue = "") String marriageCertificate,
-                              @RequestParam(required = false, defaultValue = "") String divorceDate,
-                              @RequestParam(required = false, defaultValue = "") String divorceCertificate,
-                              @RequestParam(required = false, defaultValue = "") String spouseDeathDate,
-                              @RequestParam(required = false, defaultValue = "") String deathCertificate,
-                              @RequestParam(required = false, defaultValue = "") String childrenLines,
-                              @RequestParam(required = false, defaultValue = "") String realEstateLines,
-                              @RequestParam(required = false, defaultValue = "") String vehicleLines,
-                              @RequestParam(required = false, defaultValue = "EMPLOYED") String employmentStatus,
-                              @RequestParam(required = false, defaultValue = "") String hardshipReasonInput,
-                              @RequestParam(required = false, defaultValue = "") String employmentIncomeInput,
-                              @RequestParam(required = false, defaultValue = "") String loanFundsUsageInput,
-                              HttpSession session) {
+    public String previewPage(@ModelAttribute PreviewFormData form, HttpSession session) {
+        List<Creditor> creditors = previewInputParser.parseCreditors(form.getCreditorLines());
+        List<RealEstateItem> realEstateItems = previewInputParser.parseRealEstateItems(form.getRealEstateLines());
+        List<Vehicle> vehicles = previewInputParser.parseVehicles(form.getVehicleLines());
+        List<Child> children = previewInputParser.parseChildren(form.getChildrenLines());
 
-        List<Creditor> creditors = parseCreditors(creditorLines);
-        List<RealEstateItem> realEstateItems = parseRealEstateItems(realEstateLines);
-        List<Vehicle> vehicles = parseVehicles(vehicleLines);
-
-        BankruptcyApplicationData dataForDocx = buildApplicationData(fullName, creditors, realEstateItems, vehicles, employmentStatus);
+        BankruptcyApplicationData dataForDocx = buildApplicationData(form, creditors, realEstateItems, vehicles, children);
         session.setAttribute(DocumentGenerationController.SESSION_PREVIEW_DATA, dataForDocx);
 
         BigDecimal totalDebt = debtCalculationService.calculateTotalDebt(creditors);
-        String familyBlock = buildFamilyBlock(maritalStatus, spouseName, marriageDate, marriageCertificate,
-                divorceDate, divorceCertificate, spouseDeathDate, deathCertificate, childrenLines);
-        String propertyBlock = buildPropertyBlock(realEstateLines, vehicleLines);
-        String employmentBlock = buildEmploymentBlock(employmentStatus);
+        String familyBlock = buildFamilyBlock(form, children);
+        String propertyBlock = buildPropertyBlock(form.getRealEstateLines(), form.getVehicleLines());
+        String employmentBlock = buildEmploymentBlock(form.getEmploymentStatus());
         OpenAiTextBlocks auxiliaryTextBlocks = openAiTextBlockService.generateAuxiliaryBlocks(
-                hardshipReasonInput,
-                employmentIncomeInput,
-                loanFundsUsageInput
+                form.getHardshipReasonInput(),
+                form.getEmploymentIncomeInput(),
+                form.getLoanFundsUsageInput()
         );
 
         StringBuilder html = new StringBuilder();
         html.append("""
                 <!doctype html>
-                <html lang="ru">
-                <head>
-                    <meta charset="UTF-8">
-                    <title>BankrotApp — Предпросмотр</title>
-                    <style>
-                        body { font-family: Arial, sans-serif; margin: 2rem; max-width: 980px; }
-                        section { border: 1px solid #ddd; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
-                        h2 { margin-top: 0; }
-                        ul { margin: .4rem 0 .8rem 1.2rem; }
-                        .action { margin-top: 1.8rem; }
-                        .action button { padding: 1rem 1.4rem; cursor: pointer; font-size: 1.05rem; font-weight: 700; background: #0b6bcb; color: #fff; border: 0; border-radius: 8px; }
-                    </style>
-                </head>
-                <body>
-                    <h1>Предпросмотр данных заявления</h1>
+                <html lang="ru"><head><meta charset="UTF-8"><title>BankrotApp — Предпросмотр</title>
+                <style>body{font-family:Arial,sans-serif;margin:2rem;max-width:1080px;}section{border:1px solid #ddd;border-radius:8px;padding:1rem;margin-bottom:1rem;} .warn{color:#b00020;font-weight:700;}</style>
+                </head><body><h1>Предпросмотр данных заявления</h1>
                 """);
 
-        html.append("<section><h2>ФИО должника</h2><p>")
-                .append(escape(fullName))
-                .append("</p></section>");
+        html.append("<section><h2>Данные должника</h2><ul>")
+                .append(li("ФИО", form.getFullName()))
+                .append(li("Дата рождения", form.getBirthDate()))
+                .append(li("Место рождения", form.getBirthPlace()))
+                .append(li("СНИЛС", form.getSnils()))
+                .append(li("ИНН", form.getInn()))
+                .append(li("Паспорт", form.getPassportSeries() + " " + form.getPassportNumber()))
+                .append(li("Кем выдан", form.getPassportIssuedBy()))
+                .append(li("Дата выдачи", form.getPassportIssueDate()))
+                .append(li("Код подразделения", form.getPassportDivisionCode()))
+                .append(li("Адрес", effectiveAddress(form)))
+                .append("</ul></section>");
 
-        html.append("<section><h2>Шапка заявления</h2>");
-        if (creditors.isEmpty()) {
-            html.append("<p>Кредиторы не указаны.</p>");
+        html.append("<section><h2>Кредиторы и суммы</h2>");
+        for (Creditor creditor : creditors) {
+            appendCreditorDebtBlock(html, creditor);
+        }
+        html.append("<p><strong>Общая сумма долга:</strong> ")
+                .append(debtCalculationService.formatAmountRu(totalDebt))
+                .append(" ₽</p></section>");
+
+        html.append("<section><h2>Сформированные блоки</h2><ul>")
+                .append(li("Семейный блок", familyBlock))
+                .append(li("Дети", children.isEmpty() ? "детей нет" : "дети указаны: " + children.size()))
+                .append(li("Недвижимость", realEstateItems.isEmpty() ? "нет" : "объектов: " + realEstateItems.size()))
+                .append(li("Транспорт", vehicles.isEmpty() ? "нет" : "единиц: " + vehicles.size()))
+                .append(li("Занятость", employmentBlock))
+                .append(li("Приложения", "данные по справкам/листам заполнены в соответствующем блоке"))
+                .append("</ul></section>");
+
+        html.append("<section><h2>Предупреждения</h2>");
+        List<String> warnings = buildWarnings(form);
+        if (warnings.isEmpty()) {
+            html.append("<p>Нет.</p>");
         } else {
-            for (int i = 0; i < creditors.size(); i++) {
-                Creditor creditor = creditors.get(i);
-                html.append("<p><strong>Кредитор ")
-                        .append(i + 1)
-                        .append(":</strong> ")
-                        .append(escape(creditor.name()))
-                        .append("</p>");
+            for (String warning : warnings) {
+                html.append("<p class='warn'>").append(escape(warning)).append("</p>");
             }
         }
         html.append("</section>");
 
-        html.append("<section><h2>Текст заявления: задолженность по кредиторам</h2>");
-        if (creditors.isEmpty()) {
-            html.append("<p>Кредиторы не указаны.</p>");
-        } else {
-            for (Creditor creditor : creditors) {
-                appendCreditorDebtBlock(html, creditor);
-            }
-        }
-        html.append("<p><strong>Общая сумма долга:</strong> ")
-                .append(debtCalculationService.formatAmountRu(totalDebt))
-                .append(" ₽</p>")
-                .append("</section>");
-
-        html.append("<section><h2>Семейный блок</h2><pre>")
-                .append(escape(familyBlock.isBlank() ? "Нет данных" : familyBlock))
-                .append("</pre></section>");
-
-        html.append("<section><h2>Блок имущества</h2><pre>")
-                .append(escape(propertyBlock.isBlank() ? "Нет данных" : propertyBlock))
-                .append("</pre></section>");
-
-        html.append("<section><h2>Блок занятости</h2><pre>")
-                .append(escape(employmentBlock))
-                .append("</pre></section>");
-
-        html.append("<section><h2>Данные, которые уйдут в DOCX</h2>")
-                .append("<p><strong>ФИО:</strong> ").append(escape(dataForDocx.debtor().fullName())).append("</p>")
-                .append("<p><strong>Кредиторов:</strong> ").append(dataForDocx.creditors().size()).append("</p>")
-                .append("<p><strong>Недвижимости:</strong> ").append(dataForDocx.propertyInfo().realEstateItems().size()).append("</p>")
-                .append("<p><strong>Транспорта:</strong> ").append(dataForDocx.propertyInfo().vehicles().size()).append("</p>")
-                .append("</section>");
+        html.append("<section><h2>Справки и документы</h2><ul>")
+                .append(li("ЕГРИП", form.getEgripCertificate()))
+                .append(li("ГИБДД", form.getGibddResponse()))
+                .append(li("ЕГРН", form.getEgrnExtract()))
+                .append(li("Листы паспорта", form.getPassportPages()))
+                .append(li("Листы ИНН", form.getInnPages()))
+                .append(li("Листы СНИЛС", form.getSnilsPages()))
+                .append(li("Листы СЗИ-ИЛС", form.getSziIlsPages()))
+                .append(li("Листы сведений о счетах", form.getBankAccountsPages()))
+                .append(li("Листы справки налоговой", form.getTaxCertificatePages()))
+                .append(li("Листы справки о судимости", form.getCriminalRecordPages()))
+                .append(li("Листы отправки кредиторам", form.getCreditorPostingProofPages()))
+                .append("</ul></section>");
 
         html.append("<section><h2>Вспомогательные блоки перед генерацией DOCX</h2>")
                 .append("<p><strong>Источник:</strong> ")
                 .append(auxiliaryTextBlocks.generatedByOpenAi() ? "OpenAI API" : "Пользовательский/стандартный fallback")
-                .append("</p>")
-                .append("<p><strong>Причина тяжелого финансового положения:</strong> ")
-                .append(escape(auxiliaryTextBlocks.hardshipReason()))
-                .append("</p>")
-                .append("<p><strong>Описание работы/доходов:</strong> ")
-                .append(escape(auxiliaryTextBlocks.employmentIncomeDescription()))
-                .append("</p>")
-                .append("<p><strong>На что были потрачены заемные средства:</strong> ")
-                .append(escape(auxiliaryTextBlocks.loanFundsUsageDescription()))
-                .append("</p>")
-                .append("</section>");
+                .append("</p><p><strong>Причина:</strong> ").append(escape(auxiliaryTextBlocks.hardshipReason()))
+                .append("</p><p><strong>Работа/доходы:</strong> ").append(escape(auxiliaryTextBlocks.employmentIncomeDescription()))
+                .append("</p><p><strong>Использование займа:</strong> ").append(escape(auxiliaryTextBlocks.loanFundsUsageDescription()))
+                .append("</p></section>");
 
-        html.append("<form class=\"action\" method=\"post\" action=\"/generate\">")
-                .append("<button type=\"submit\">Сформировать ZIP с DOCX-документами</button>")
-                .append("</form>");
-
-        html.append("<p><a href='/'>← Назад к форме</a></p>")
-                .append("</body></html>");
-
+        html.append("<form class=\"action\" method=\"post\" action=\"/generate\"><button type=\"submit\">Сформировать ZIP с DOCX-документами</button></form>")
+                .append("<p><a href='/'>← Назад к форме</a></p></body></html>");
         return html.toString();
     }
 
-    private BankruptcyApplicationData buildApplicationData(String fullName,
+    private BankruptcyApplicationData buildApplicationData(PreviewFormData form,
                                                            List<Creditor> creditors,
                                                            List<RealEstateItem> realEstateItems,
                                                            List<Vehicle> vehicles,
-                                                           String employmentStatus) {
-        Address address = new Address("Россия", "г. Москва", "Москва", "Тверская", "10", "15", "125009");
-        Debtor debtor = new Debtor(
-                fullName,
-                LocalDate.of(1989, 3, 14),
-                "112-233-445 95",
-                "770123456789",
-                "4510 123456",
-                address,
-                address,
-                "79161234567",
-                "preview@example.com",
-                "г. Москва"
+                                                           List<Child> children) {
+        Address registration = new Address(
+                "Россия",
+                safe(form.getRegistrationRegion()),
+                safe(form.getRegistrationCity()),
+                safe(form.getRegistrationStreet()),
+                safe(form.getRegistrationHouse() + " " + form.getRegistrationBuilding()).trim(),
+                safe(form.getRegistrationApartment()),
+                safe(form.getRegistrationPostalCode())
         );
-
+        Debtor debtor = new Debtor(
+                form.getFullName().isBlank() ? "-" : form.getFullName(),
+                parseDate(form.getBirthDate()),
+                safe(form.getSnils()),
+                safe(form.getInn()),
+                (safe(form.getPassportSeries()) + " " + safe(form.getPassportNumber())).trim(),
+                registration,
+                registration,
+                "",
+                "",
+                safe(form.getBirthPlace())
+        );
+        EmploymentInfo employmentInfo = new EmploymentInfo(
+                safe(form.getEmploymentStatus()),
+                safe(form.getEmployerName()),
+                safe(form.getPosition()),
+                parseAmount(form.getMonthlyIncome())
+        );
         PropertyInfo propertyInfo = new PropertyInfo(vehicles, realEstateItems, false);
-        EmploymentInfo employmentInfo = new EmploymentInfo(employmentStatus, "", "", BigDecimal.ZERO);
-        return new BankruptcyApplicationData(debtor, creditors, null, employmentInfo, propertyInfo);
+        FamilyInfo familyInfo = new FamilyInfo(
+                "MARRIED".equalsIgnoreCase(safe(form.getMaritalStatus())),
+                familyDescriptor(form),
+                children
+        );
+        return new BankruptcyApplicationData(debtor, creditors, familyInfo, employmentInfo, propertyInfo);
     }
 
-    private List<RealEstateItem> parseRealEstateItems(String realEstateLines) {
-        List<String[]> rows = parseStructuredLines(realEstateLines, 2);
-        List<RealEstateItem> items = new ArrayList<>();
-        for (String[] row : rows) {
-            items.add(new RealEstateItem(row[0],
-                    new Address("Россия", "г. Москва", "Москва", row[1], "", "", ""),
-                    null,
-                    "Собственность"));
-        }
-        return items;
+    private String familyDescriptor(PreviewFormData form) {
+        String status = safe(form.getMaritalStatus()).toUpperCase();
+        return switch (status) {
+            case "MARRIED" -> safe(form.getSpouseName()) + ", дата брака: " + safe(form.getMarriageDate())
+                    + ", свидетельство: " + safe(form.getMarriageCertificate());
+            case "DIVORCED" -> "дата расторжения брака: " + safe(form.getDivorceDate())
+                    + ", свидетельство о расторжении брака: " + safe(form.getDivorceCertificate());
+            case "WIDOWED" -> safe(form.getSpouseName()) + ", дата смерти: " + safe(form.getSpouseDeathDate())
+                    + ", свидетельство о смерти: " + safe(form.getDeathCertificate());
+            default -> "";
+        };
     }
 
-    private List<Vehicle> parseVehicles(String vehicleLines) {
-        List<String[]> rows = parseStructuredLines(vehicleLines, 5);
-        List<Vehicle> items = new ArrayList<>();
-        for (String[] row : rows) {
-            Integer year = null;
-            try {
-                year = Integer.parseInt(row[4]);
-            } catch (NumberFormatException ignored) {
-            }
-            items.add(new Vehicle(row[0], row[1], row[2], row[3], year));
+    private List<String> buildWarnings(PreviewFormData form) {
+        String status = safe(form.getMaritalStatus()).toUpperCase();
+        List<String> warnings = new ArrayList<>();
+        boolean spouseFieldsFilled = !safe(form.getSpouseName()).isBlank()
+                || !safe(form.getMarriageDate()).isBlank()
+                || !safe(form.getMarriageCertificate()).isBlank()
+                || !safe(form.getDivorceDate()).isBlank()
+                || !safe(form.getDivorceCertificate()).isBlank()
+                || !safe(form.getSpouseDeathDate()).isBlank()
+                || !safe(form.getDeathCertificate()).isBlank();
+        if ("SINGLE".equals(status) && spouseFieldsFilled) {
+            warnings.add("maritalStatus = SINGLE, но заполнены данные супруга — эти данные будут проигнорированы.");
         }
-        return items;
+        return warnings;
     }
 
-    private List<Creditor> parseCreditors(String creditorLines) {
-        if (creditorLines == null || creditorLines.isBlank()) {
-            return List.of();
-        }
-
-        Map<String, List<Contract>> grouped = new LinkedHashMap<>();
-
-        String[] lines = creditorLines.split("\\R");
-        for (String line : lines) {
-            String trimmed = line.trim();
-            if (trimmed.isEmpty()) {
-                continue;
-            }
-
-            String[] parts = trimmed.split("\\|", 3);
-            if (parts.length < 3) {
-                continue;
-            }
-
-            String creditorName = parts[0].trim();
-            String contractName = parts[1].trim();
-            BigDecimal amount = parseAmount(parts[2].trim());
-
-            Contract contract = new Contract(contractName, "loan", amount, BigDecimal.ZERO, BigDecimal.ZERO);
-            grouped.computeIfAbsent(creditorName, key -> new ArrayList<>()).add(contract);
-        }
-
-        List<Creditor> result = new ArrayList<>();
-        for (Map.Entry<String, List<Contract>> entry : grouped.entrySet()) {
-            result.add(new Creditor(entry.getKey(), "", entry.getValue()));
-        }
-
-        return result;
-    }
-
-    private BigDecimal parseAmount(String rawAmount) {
-        String normalized = rawAmount.replace(" ", "").replace(",", ".");
-        try {
-            return new BigDecimal(normalized);
-        } catch (NumberFormatException ignored) {
-            return BigDecimal.ZERO;
-        }
-    }
-
-    private String escape(String text) {
-        return text
-                .replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;");
-    }
-
-    private void appendCreditorDebtBlock(StringBuilder html, Creditor creditor) {
-        List<Contract> contracts = creditor.contracts();
-        BigDecimal creditorTotal = debtCalculationService.calculateCreditorTotal(creditor);
-
-        html.append("<article>");
-        html.append("<h3>Задолженность перед ")
-                .append(escape(creditor.name()));
-
-        if (contracts.size() > 1) {
-            html.append(" (общая сумма: ")
-                    .append(debtCalculationService.formatAmountRu(creditorTotal))
-                    .append(" ₽)");
-        }
-        html.append("</h3>");
-
-        if (contracts.isEmpty()) {
-            html.append("<p>Договоры не указаны.</p>");
-        } else if (contracts.size() == 1) {
-            Contract contract = contracts.get(0);
-            html.append("<p><strong>Основание возникновения задолженности:</strong> ")
-                    .append(escape(contract.contractNumber()))
-                    .append("</p>");
-            html.append("<p><strong>Подтверждающий документ:</strong> ")
-                    .append(escape(contract.contractNumber()))
-                    .append("</p>");
-            html.append("<p><strong>Сумма долга:</strong> ")
-                    .append(debtCalculationService.formatAmountRu(contract.principalDebt()))
-                    .append(" ₽</p>");
-        } else {
-            html.append("<ul>");
-            for (Contract contract : contracts) {
-                html.append("<li>")
-                        .append(escape(contract.contractNumber()))
-                        .append(" — ")
-                        .append(debtCalculationService.formatAmountRu(contract.principalDebt()))
-                        .append(" ₽</li>");
-            }
-            html.append("</ul>");
-        }
-
-        html.append("</article>");
-    }
-
-    private String buildFamilyBlock(String maritalStatus,
-                                    String spouseName,
-                                    String marriageDate,
-                                    String marriageCertificate,
-                                    String divorceDate,
-                                    String divorceCertificate,
-                                    String spouseDeathDate,
-                                    String deathCertificate,
-                                    String childrenLines) {
+    private String buildFamilyBlock(PreviewFormData form, List<Child> children) {
+        String status = safe(form.getMaritalStatus()).toUpperCase();
         StringBuilder block = new StringBuilder();
-        String normalizedStatus = maritalStatus == null ? "" : maritalStatus.trim().toUpperCase();
-
-        switch (normalizedStatus) {
+        switch (status) {
             case "MARRIED" -> block.append("Состоит в зарегистрированном браке");
             case "DIVORCED" -> block.append("Брак расторгнут");
             case "WIDOWED" -> block.append("Супруг(а) умер(ла)");
-            case "SINGLE" -> block.append("В браке не состоит.");
             default -> block.append("В браке не состоит.");
         }
-
-        if ("MARRIED".equals(normalizedStatus)) {
-            if (!spouseName.isBlank()) {
-                block.append(" с ").append(spouseName.trim());
-            }
-            if (!marriageDate.isBlank()) {
-                block.append(", дата регистрации брака: ").append(formatDate(marriageDate));
-            }
-            if (!marriageCertificate.isBlank()) {
-                block.append(", свидетельство о заключении брака: ").append(marriageCertificate.trim());
-            }
-            block.append(".");
+        if ("MARRIED".equals(status)) {
+            block.append(" с ").append(safe(form.getSpouseName()))
+                    .append(", дата регистрации брака: ").append(formatDate(form.getMarriageDate()))
+                    .append(", свидетельство о заключении брака: ").append(safe(form.getMarriageCertificate())).append(".");
         }
-
-        if ("DIVORCED".equals(normalizedStatus)) {
-            if (!divorceDate.isBlank()) {
-                block.append(", дата расторжения брака: ").append(formatDate(divorceDate));
-            }
-            if (!divorceCertificate.isBlank()) {
-                block.append(", свидетельство о расторжении брака: ").append(divorceCertificate.trim());
-            }
-            block.append(".");
+        if ("DIVORCED".equals(status)) {
+            block.append(", дата расторжения брака: ").append(formatDate(form.getDivorceDate()))
+                    .append(", свидетельство о расторжении брака: ").append(safe(form.getDivorceCertificate())).append(".");
         }
-
-        if ("WIDOWED".equals(normalizedStatus)) {
-            if (!spouseName.isBlank()) {
-                block.append(" ").append(spouseName.trim());
-            }
-            if (!spouseDeathDate.isBlank()) {
-                block.append(", дата смерти: ").append(formatDate(spouseDeathDate));
-            }
-            if (!deathCertificate.isBlank()) {
-                block.append(", свидетельство о смерти: ").append(deathCertificate.trim());
-            }
-            block.append(".");
+        if ("WIDOWED".equals(status)) {
+            block.append(" ").append(safe(form.getSpouseName()))
+                    .append(", дата смерти: ").append(formatDate(form.getSpouseDeathDate()))
+                    .append(", свидетельство о смерти: ").append(safe(form.getDeathCertificate())).append(".");
         }
-
-        List<String[]> children = parseStructuredLines(childrenLines, 3);
-        block.append(System.lineSeparator());
-        if (children.isEmpty()) {
-            block.append("Несовершеннолетних детей на иждивении не имеет.");
-        } else {
-            block.append("Несовершеннолетние дети:");
-            for (String[] child : children) {
-                block.append(System.lineSeparator())
-                        .append("- ")
-                        .append(child[0])
-                        .append(", дата рождения: ")
-                        .append(formatDate(child[1]))
-                        .append(", свидетельство о рождении: ")
-                        .append(child[2]);
-            }
-        }
-
+        block.append(children.isEmpty() ? " Несовершеннолетних детей на иждивении не имеет." : " Несовершеннолетние дети указаны.");
         return block.toString();
     }
 
     private String buildPropertyBlock(String realEstateLines, String vehicleLines) {
         StringBuilder block = new StringBuilder();
-        List<String[]> realEstateItems = parseStructuredLines(realEstateLines, 2);
-        List<String[]> vehicles = parseStructuredLines(vehicleLines, 5);
-
-        if (realEstateItems.isEmpty()) {
-            block.append("Объекты недвижимости в собственности отсутствуют.");
-        } else {
-            block.append("В собственности имеется недвижимое имущество:");
-            for (String[] item : realEstateItems) {
-                block.append(System.lineSeparator())
-                        .append("- ")
-                        .append(item[0])
-                        .append(": ")
-                        .append(item[1]);
-            }
-        }
-
-        block.append(System.lineSeparator());
-        if (vehicles.isEmpty()) {
-            block.append("Транспортные средства отсутствуют.");
-        } else {
-            block.append("Транспортные средства:");
-            for (String[] vehicle : vehicles) {
-                block.append(System.lineSeparator())
-                        .append("- ")
-                        .append(vehicle[0])
-                        .append(" ")
-                        .append(vehicle[1])
-                        .append(" ")
-                        .append(vehicle[2])
-                        .append(", гос. номер: ")
-                        .append(vehicle[3])
-                        .append(", год выпуска: ")
-                        .append(vehicle[4]);
-            }
-        }
-
+        List<String[]> realEstateItems = previewInputParser.parseStructuredLines(realEstateLines, 7);
+        List<String[]> vehicles = previewInputParser.parseStructuredLines(vehicleLines, 11);
+        block.append(realEstateItems.isEmpty() ? "Объекты недвижимости в собственности отсутствуют." : "Недвижимость указана.")
+                .append(System.lineSeparator())
+                .append(vehicles.isEmpty() ? "Транспортные средства отсутствуют." : "Транспортные средства указаны.");
         return block.toString();
     }
 
@@ -527,46 +369,82 @@ public class WebPreviewController {
         return switch (normalizedStatus) {
             case "UNEMPLOYED" -> "Официального места работы не имеет.";
             case "EMPLOYED" -> "Официально трудоустроен.";
+            case "INFORMAL_WORK" -> "Неформальная занятость.";
+            case "PENSIONER" -> "Пенсионер.";
+            case "OTHER" -> "Иной статус занятости.";
             default -> "Сведения о занятости не предоставлены.";
         };
     }
 
-    private List<String[]> parseStructuredLines(String lines, int columns) {
-        if (lines == null || lines.isBlank()) {
-            return List.of();
+    private void appendCreditorDebtBlock(StringBuilder html, Creditor creditor) {
+        BigDecimal creditorTotal = debtCalculationService.calculateCreditorTotal(creditor);
+        html.append("<article><h3>Задолженность перед ")
+                .append(escape(creditor.name()))
+                .append(" (общая сумма: ")
+                .append(debtCalculationService.formatAmountRu(creditorTotal))
+                .append(" ₽)</h3><ul>");
+        for (Contract contract : creditor.contracts()) {
+            html.append("<li>")
+                    .append(escape(contract.contractNumber()))
+                    .append(" — ")
+                    .append(debtCalculationService.formatAmountRu(contract.principalDebt()))
+                    .append(" ₽</li>");
         }
+        html.append("</ul></article>");
+    }
 
-        List<String[]> parsed = new ArrayList<>();
-        for (String line : lines.split("\\R")) {
-            String trimmed = line.trim();
-            if (trimmed.isEmpty()) {
-                continue;
-            }
+    private String li(String key, String value) {
+        return "<li><strong>" + escape(key) + ":</strong> " + escape(value == null || value.isBlank() ? "-" : value) + "</li>";
+    }
 
-            String[] parts = trimmed.split("\\|", -1);
-            if (parts.length < columns) {
-                continue;
-            }
-
-            String[] normalized = new String[columns];
-            for (int i = 0; i < columns; i++) {
-                normalized[i] = parts[i].trim();
-            }
-            parsed.add(normalized);
+    private String effectiveAddress(PreviewFormData form) {
+        if (!safe(form.getRegistrationFullAddress()).isBlank()) {
+            return form.getRegistrationFullAddress();
         }
+        return String.join(", ", safe(form.getRegistrationPostalCode()), safe(form.getRegistrationRegion()),
+                safe(form.getRegistrationDistrict()), safe(form.getRegistrationCity()), safe(form.getRegistrationSettlement()),
+                safe(form.getRegistrationStreet()), safe(form.getRegistrationHouse()), safe(form.getRegistrationBuilding()), safe(form.getRegistrationApartment()))
+                .replaceAll("(, )+", ", ").replaceAll("^, |, $", "");
+    }
 
-        return parsed;
+    private BigDecimal parseAmount(String value) {
+        try {
+            return new BigDecimal(safe(value).replace(" ", "").replace(',', '.'));
+        } catch (Exception ignored) {
+            return BigDecimal.ZERO;
+        }
+    }
+
+    private LocalDate parseDate(String dateValue) {
+        if (dateValue == null || dateValue.isBlank()) {
+            return LocalDate.of(1989, 3, 14);
+        }
+        try {
+            return LocalDate.parse(dateValue.trim(), DATE_FORMATTER);
+        } catch (DateTimeParseException ignored) {
+            return LocalDate.of(1989, 3, 14);
+        }
     }
 
     private String formatDate(String dateValue) {
         if (dateValue == null || dateValue.isBlank()) {
             return "";
         }
-
         try {
             return LocalDate.parse(dateValue.trim(), DATE_FORMATTER).format(DATE_FORMATTER);
         } catch (DateTimeParseException ignored) {
             return dateValue.trim();
         }
+    }
+
+    private String safe(String value) {
+        return value == null ? "" : value.trim();
+    }
+
+    private String escape(String text) {
+        return (text == null ? "" : text)
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;");
     }
 }
