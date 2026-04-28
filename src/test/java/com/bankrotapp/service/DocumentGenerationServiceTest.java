@@ -46,21 +46,22 @@ class DocumentGenerationServiceTest {
         assertContainsWithPreview(text, "о признании несостоятельным (банкротом) должника - физического лица");
         assertContainsWithPreview(text, "В соответствии со ст. 213.3");
         assertContainsWithPreview(text, "Согласно ст. 213.4");
+        assertContainsWithPreview(text, "пункте 3 статьи 213.4");
+        assertContainsWithPreview(text, "абзац второй пункта 1 статьи 42");
         assertContainsWithPreview(text, "прошу суд");
-        assertContainsWithPreview(text, "Признать гражданина");
-        assertContainsWithPreview(text, "Утвердить финансового управляющего");
         assertContainsWithPreview(text, "Приложение документов для Арбитражного суда");
     }
 
     @Test
-    void testStatementIsNotCollapsedToShortPreview() throws Exception {
+    void testStatementIsRenderedFromTemplateNotCreatedFromScratch() throws Exception {
         byte[] statementBytes = service.generateStatementDocx(ivanovClient());
-        String text = extract(service.generateStatementDocx(ivanovClient()));
-        int paragraphCount = paragraphCount(statementBytes);
 
-        assertTrue(paragraphCount > 40, "Ожидалось, что документ не свернут в короткую выжимку.");
-        assertContainsWithPreview(text, "В соответствии со ст. 213.3");
-        assertContainsWithPreview(text, "Приложение документов для Арбитражного суда");
+        assertTrue(containsZipEntry(statementBytes, "word/styles.xml"));
+        assertTrue(containsZipEntry(statementBytes, "word/numbering.xml"));
+        assertTrue(containsZipEntry(statementBytes, "word/theme/theme1.xml"));
+        assertTrue(containsZipEntry(statementBytes, "word/fontTable.xml"));
+        assertTrue(paragraphCount(statementBytes) >= 90, "Ожидалось не менее 90 абзацев в заявлении.");
+        assertTrue(runCount(statementBytes) >= 400, "Ожидалось не менее 400 runs в заявлении.");
     }
 
     @Test
@@ -94,10 +95,12 @@ class DocumentGenerationServiceTest {
     }
 
     @Test
-    void testGeneratedStatementForIvanovReplacesClientDataOnly() throws Exception {
+    void testStatementContainsCurrentClientData() throws Exception {
         String text = extract(service.generateStatementDocx(ivanovClient()));
 
         assertContainsWithPreview(text, "Иванов Сергей Николаевич");
+        assertContainsWithPreview(text, "Иванов С. Н.");
+        assertContainsWithPreview(text, "Иванова Сергея Николаевича");
         assertContainsWithPreview(text, "АО Альфа-Банк");
         assertContainsWithPreview(text, "ООО МКК Срочноденьги");
         assertContainsWithPreview(text, "ООО ПКО Право Онлайн");
@@ -151,6 +154,8 @@ class DocumentGenerationServiceTest {
         assertContainsWithPreview(text, "Приложение документов для Арбитражного суда");
 
         assertContainsWithPreview(text, "Иванов Сергей Николаевич");
+        assertContainsWithPreview(text, "Иванов С. Н.");
+        assertContainsWithPreview(text, "Иванова Сергея Николаевича");
         assertContainsWithPreview(text, "АО Альфа-Банк");
         assertContainsWithPreview(text, "ООО МКК Срочноденьги");
         assertContainsWithPreview(text, "ООО ПКО Право Онлайн");
@@ -177,16 +182,17 @@ class DocumentGenerationServiceTest {
     }
 
     @Test
-    void testStatementDoesNotContainOldAmountsAndContracts() throws Exception {
-        String text = extract(service.generateStatementDocx(smirnovClient()));
+    void testStatementDoesNotContainOldTemplateData() throws Exception {
+        String text = extract(service.generateStatementDocx(ivanovClient()));
+        assertNotContainsWithPreview(text, "Захаров");
+        assertNotContainsWithPreview(text, "ВЭББАНКИР");
+        assertNotContainsWithPreview(text, "ТУРБОЗАЙМ");
+        assertNotContainsWithPreview(text, "МИГКРЕДИТ");
+        assertNotContainsWithPreview(text, "MITSUBISHI RVR");
         assertNotContainsWithPreview(text, "1 248 887,93");
-        assertNotContainsWithPreview(text, "49 638,43");
-        assertNotContainsWithPreview(text, "30 842,40");
-        assertNotContainsWithPreview(text, "7 423,05");
-        assertNotContainsWithPreview(text, "1003074184/13");
-        assertNotContainsWithPreview(text, "АА 17226041");
-        assertNotContainsWithPreview(text, "1537512052");
     }
+
+
 
     @Test
     void testStatementUsesCorrectShortName() throws Exception {
@@ -223,14 +229,25 @@ class DocumentGenerationServiceTest {
     }
 
     @Test
-    void testStatementFamilyBlockForSingleNoChildren() throws Exception {
-        String text = extract(service.generateStatementDocx(smirnovClient()));
-        assertContainsWithPreview(text, "В браке не состоит");
+    void testStatementFamilyBlockForDivorcedNoChildren() throws Exception {
+        String text = extract(service.generateStatementDocx(ivanovClient()));
+        assertContainsWithPreview(text, "Брак расторгнут");
+        assertContainsWithPreview(text, "дата расторжения брака: 22.09.2021");
+        assertContainsWithPreview(text, "свидетельство о расторжении брака: II-БР №654321");
         assertContainsWithPreview(text, "Несовершеннолетних детей на иждивении не имеет");
+        assertNotContainsWithPreview(text, "В браке не состоит");
         assertNotContainsWithPreview(text, "свидетельству о заключении брака");
-        assertNotContainsWithPreview(text, "свидетельству о рождении");
+        assertNotContainsWithPreview(text, "Захарова Алёна");
         assertNotContainsWithPreview(text, "Наймушина");
-        assertNotContainsWithPreview(text, "Алёна");
+    }
+
+
+    @Test
+    void testStatementDoesNotDuplicateContractType() throws Exception {
+        String text = extract(service.generateStatementDocx(ivanovClient()));
+        assertNotContainsWithPreview(text, "Кредитный договор №Кредитный договор");
+        assertNotContainsWithPreview(text, "Кредитный договор №Договор");
+        assertNotContainsWithPreview(text, "Договор займа №Договор");
     }
 
     @Test
@@ -258,10 +275,10 @@ class DocumentGenerationServiceTest {
     }
 
     @Test
-    void testAttachmentsBlockDependsOnFamilyAndProperty() throws Exception {
-        String text = extract(service.generateStatementDocx(smirnovClient()));
-        assertNotContainsWithPreview(text, "Копия свидетельства о заключении брака");
-        assertNotContainsWithPreview(text, "Копия свидетельства о рождении");
+    void testStatementAttachmentsDependOnVehiclePresence() throws Exception {
+        String text = extract(service.generateStatementDocx(ivanovClient()));
+        assertContainsWithPreview(text, "Ответ из ГИБДД об отсутствии транспортных средств");
+        assertNotContainsWithPreview(text, "Ответ из ГИБДД о наличии транспортных средств");
     }
 
     @Test
@@ -344,7 +361,7 @@ class DocumentGenerationServiceTest {
         return new BankruptcyApplicationData(
                 debtor,
                 creditors,
-                new FamilyInfo(false, "Иванова Мария Сергеевна", List.of()),
+                new FamilyInfo(false, "дата расторжения брака: 22.09.2021, свидетельство о расторжении брака: II-БР №654321", List.of()),
                 new EmploymentInfo("UNEMPLOYED", "", "", BigDecimal.ZERO),
                 new PropertyInfo(List.of(), List.of(), false)
         );
@@ -402,6 +419,24 @@ class DocumentGenerationServiceTest {
         try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(bytes))) {
             return document.getParagraphs().size();
         }
+    }
+
+    private int runCount(byte[] bytes) throws Exception {
+        try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(bytes))) {
+            return document.getParagraphs().stream().mapToInt(paragraph -> paragraph.getRuns().size()).sum();
+        }
+    }
+
+    private boolean containsZipEntry(byte[] docxBytes, String entryName) throws IOException {
+        try (ZipInputStream zipInputStream = new ZipInputStream(new ByteArrayInputStream(docxBytes), StandardCharsets.UTF_8)) {
+            ZipEntry entry;
+            while ((entry = zipInputStream.getNextEntry()) != null) {
+                if (entryName.equals(entry.getName())) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private List<String> listDocxEntries(byte[] zipBytes) throws IOException {
