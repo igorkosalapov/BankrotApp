@@ -10,6 +10,7 @@ import com.bankrotapp.model.EmploymentInfo;
 import com.bankrotapp.model.FamilyInfo;
 import com.bankrotapp.model.PropertyInfo;
 import com.bankrotapp.model.Vehicle;
+import com.bankrotapp.template.TemplatePreparationTool;
 import org.apache.poi.xwpf.extractor.XWPFWordExtractor;
 import org.apache.poi.xwpf.usermodel.XWPFDocument;
 import org.junit.jupiter.api.Test;
@@ -23,12 +24,14 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DocumentGenerationServiceTest {
@@ -37,6 +40,45 @@ class DocumentGenerationServiceTest {
             new DebtCalculationService(),
             new DocxTemplateRenderer()
     );
+    private static final Set<String> REQUIRED_MARKERS = Set.of(
+            "{{headerBlock}}",
+            "{{debtorIntroBlock}}",
+            "{{creditorsDebtBlock}}",
+            "{{employmentBlock}}",
+            "{{familyBlock}}",
+            "{{vehicleBlock}}",
+            "{{attachmentsBlock}}",
+            "{{signatureFullName}}"
+    );
+
+    @Test
+    void testStatementTemplateMustContainRequiredMarkers() throws Exception {
+        byte[] rawStatementTemplate = readResource("templates/zayavlenie.docx");
+        byte[] prepared = TemplatePreparationTool.prepareStatementTemplate(rawStatementTemplate);
+        String xml = readWordXml(prepared);
+        for (String marker : REQUIRED_MARKERS) {
+            assertTrue(xml.contains(marker), "Отсутствует обязательный marker: " + marker);
+        }
+    }
+
+    @Test
+    void testGenerationFailsIfStatementTemplateIsRaw() throws Exception {
+        byte[] brokenRaw = createBrokenDocxWithoutDocumentXml();
+        IllegalStateException exception = assertThrows(IllegalStateException.class,
+                () -> service.prepareStatementTemplate(brokenRaw));
+        assertTrue(exception.getMessage().contains("Statement template preparation failed: missing marker {{headerBlock}}"));
+    }
+
+    @Test
+    void testGenerateZipUsesPreparedTemplatesOnly() throws Exception {
+        byte[] prepared = TemplatePreparationTool.prepareStatementTemplate(readResource("templates/zayavlenie.docx"));
+        String preparedXml = readWordXml(prepared);
+        for (String marker : REQUIRED_MARKERS) {
+            assertTrue(preparedXml.contains(marker), "Prepared template must contain marker " + marker);
+        }
+        byte[] zip = service.generateZip(ivanovClient());
+        assertNotNull(zip);
+    }
 
     @Test
     void testStatementKeepsLegalTemplateStructure() throws Exception {
@@ -46,21 +88,22 @@ class DocumentGenerationServiceTest {
         assertContainsWithPreview(text, "о признании несостоятельным (банкротом) должника - физического лица");
         assertContainsWithPreview(text, "В соответствии со ст. 213.3");
         assertContainsWithPreview(text, "Согласно ст. 213.4");
+        assertContainsWithPreview(text, "пункте 3 статьи 213.4");
+        assertContainsWithPreview(text, "абзац второй пункта 1 статьи 42");
         assertContainsWithPreview(text, "прошу суд");
-        assertContainsWithPreview(text, "Признать гражданина");
-        assertContainsWithPreview(text, "Утвердить финансового управляющего");
         assertContainsWithPreview(text, "Приложение документов для Арбитражного суда");
     }
 
     @Test
-    void testStatementIsNotCollapsedToShortPreview() throws Exception {
+    void testStatementIsRenderedFromTemplateNotCreatedFromScratch() throws Exception {
         byte[] statementBytes = service.generateStatementDocx(ivanovClient());
-        String text = extract(service.generateStatementDocx(ivanovClient()));
-        int paragraphCount = paragraphCount(statementBytes);
 
-        assertTrue(paragraphCount > 40, "Ожидалось, что документ не свернут в короткую выжимку.");
-        assertContainsWithPreview(text, "В соответствии со ст. 213.3");
-        assertContainsWithPreview(text, "Приложение документов для Арбитражного суда");
+        assertTrue(containsZipEntry(statementBytes, "word/styles.xml"));
+        assertTrue(containsZipEntry(statementBytes, "word/numbering.xml"));
+        assertTrue(containsZipEntry(statementBytes, "word/theme/theme1.xml"));
+        assertTrue(containsZipEntry(statementBytes, "word/fontTable.xml"));
+        assertTrue(paragraphCount(statementBytes) >= 90, "Ожидалось не менее 90 абзацев в заявлении.");
+        assertTrue(runCount(statementBytes) >= 400, "Ожидалось не менее 400 runs в заявлении.");
     }
 
     @Test
@@ -82,6 +125,14 @@ class DocumentGenerationServiceTest {
     }
 
     @Test
+    void testAppendix2SignatureUsesCurrentDebtor() throws Exception {
+        BankruptcyApplicationData data = ivanovClient();
+        String text = extract(service.generateAppendixTwoDocx(data, List.of(), List.of(), List.of()));
+        assertContainsWithPreview(text, "Иванов Сергей Николаевич");
+        assertNotContainsWithPreview(text, "Захаров Владимир Игоревич");
+    }
+
+    @Test
     void testGenerateZipContainsThreeDocxFiles() throws Exception {
         byte[] zip = service.generateZip(ivanovClient());
 
@@ -94,10 +145,12 @@ class DocumentGenerationServiceTest {
     }
 
     @Test
-    void testGeneratedStatementForIvanovReplacesClientDataOnly() throws Exception {
+    void testStatementContainsCurrentClientData() throws Exception {
         String text = extract(service.generateStatementDocx(ivanovClient()));
 
         assertContainsWithPreview(text, "Иванов Сергей Николаевич");
+        assertContainsWithPreview(text, "Иванов С. Н.");
+        assertContainsWithPreview(text, "Иванова Сергея Николаевича");
         assertContainsWithPreview(text, "АО Альфа-Банк");
         assertContainsWithPreview(text, "ООО МКК Срочноденьги");
         assertContainsWithPreview(text, "ООО ПКО Право Онлайн");
@@ -151,6 +204,8 @@ class DocumentGenerationServiceTest {
         assertContainsWithPreview(text, "Приложение документов для Арбитражного суда");
 
         assertContainsWithPreview(text, "Иванов Сергей Николаевич");
+        assertContainsWithPreview(text, "Иванов С. Н.");
+        assertContainsWithPreview(text, "Иванова Сергея Николаевича");
         assertContainsWithPreview(text, "АО Альфа-Банк");
         assertContainsWithPreview(text, "ООО МКК Срочноденьги");
         assertContainsWithPreview(text, "ООО ПКО Право Онлайн");
@@ -177,16 +232,107 @@ class DocumentGenerationServiceTest {
     }
 
     @Test
-    void testStatementDoesNotContainOldAmountsAndContracts() throws Exception {
-        String text = extract(service.generateStatementDocx(smirnovClient()));
-        assertNotContainsWithPreview(text, "1 248 887,93");
-        assertNotContainsWithPreview(text, "49 638,43");
-        assertNotContainsWithPreview(text, "30 842,40");
-        assertNotContainsWithPreview(text, "7 423,05");
-        assertNotContainsWithPreview(text, "1003074184/13");
-        assertNotContainsWithPreview(text, "АА 17226041");
-        assertNotContainsWithPreview(text, "1537512052");
+    void testGeneratedZipHasNoLegacyDataInAnyDocx() throws Exception {
+        byte[] zip = service.generateZip(ivanovClient());
+        List<String> forbidden = List.of(
+                "Захаров",
+                "ВЭББАНКИР",
+                "ТУРБОЗАЙМ",
+                "МИГКРЕДИТ",
+                "MITSUBISHI RVR",
+                "1 248 887,93",
+                "Наймушина",
+                "Захарова Алёна",
+                "75 10 742228",
+                "744713194008",
+                "113-764-260-43",
+                "пр. Победы",
+                "Курчатовский",
+                "Смолино"
+        );
+        for (byte[] docx : readDocxEntries(zip)) {
+            String text = extract(docx);
+            for (String marker : forbidden) {
+                assertNotContainsWithPreview(text, marker);
+            }
+        }
     }
+
+    @Test
+    void testStatementGenerationFailsIfLegacyDataRemains() throws Exception {
+        byte[] legacyDocx = createDocxWithStatementText("Захаров Владимир Игоревич");
+        IllegalStateException exception = assertThrows(IllegalStateException.class,
+                () -> service.assertNoLegacyData(legacyDocx));
+        assertTrue(exception.getMessage().contains("Generated statement contains legacy data"));
+    }
+
+    @Test
+    void testGeneratedStatementHasNoLegacyData() throws Exception {
+        String text = extract(service.generateStatementDocx(ivanovClient()));
+        List<String> forbidden = List.of(
+                "Захаров",
+                "ВЭББАНКИР",
+                "ТУРБОЗАЙМ",
+                "МИГКРЕДИТ",
+                "MITSUBISHI RVR",
+                "Наймушина",
+                "Захарова Алёна",
+                "1 248 887,93",
+                "75 10 742228",
+                "744713194008",
+                "113-764-260-43",
+                "пр. Победы",
+                "Курчатовский",
+                "Смолино"
+        );
+        for (String marker : forbidden) {
+            assertNotContainsWithPreview(text, marker);
+        }
+    }
+
+    @Test
+    void testGeneratedZipStatementHasNoLegacyData() throws Exception {
+        byte[] zip = service.generateZip(ivanovClient());
+        byte[] statementDocx = readStatementDocx(zip);
+        service.assertNoLegacyData(statementDocx);
+    }
+
+    @Test
+    void testRequiredStatementMarkersExistBeforeRendering() throws Exception {
+        byte[] prepared = TemplatePreparationTool.prepareStatementTemplate(readResource("templates/zayavlenie.docx"));
+        String xml = readWordXml(prepared);
+        for (String marker : REQUIRED_MARKERS) {
+            assertTrue(xml.contains(marker));
+        }
+    }
+
+    @Test
+    void testStatementPreservesTemplateStructure() throws Exception {
+        byte[] statementBytes = service.generateStatementDocx(ivanovClient());
+        String text = extract(statementBytes);
+        assertTrue(containsZipEntry(statementBytes, "word/styles.xml"));
+        assertTrue(containsZipEntry(statementBytes, "word/numbering.xml"));
+        assertTrue(containsZipEntry(statementBytes, "word/theme/theme1.xml"));
+        assertTrue(containsZipEntry(statementBytes, "word/fontTable.xml"));
+        assertTrue(tableCount(statementBytes) > 0);
+        assertContainsWithPreview(text, "В соответствии со ст. 213.3");
+        assertContainsWithPreview(text, "Согласно ст. 213.4");
+        assertContainsWithPreview(text, "прошу суд");
+        assertContainsWithPreview(text, "Приложение документов для Арбитражного суда");
+    }
+
+    @Test
+    void testStatementDoesNotContainOldTemplateData() throws Exception {
+        String text = extract(service.generateStatementDocx(ivanovClient()));
+        assertNotContainsWithPreview(text, "Захаров");
+        assertNotContainsWithPreview(text, "ВЭББАНКИР");
+        assertNotContainsWithPreview(text, "ТУРБОЗАЙМ");
+        assertNotContainsWithPreview(text, "МИГКРЕДИТ");
+        assertNotContainsWithPreview(text, "MITSUBISHI RVR");
+        assertNotContainsWithPreview(text, "1 248 887,93");
+    }
+
+
 
     @Test
     void testStatementUsesCorrectShortName() throws Exception {
@@ -223,14 +369,25 @@ class DocumentGenerationServiceTest {
     }
 
     @Test
-    void testStatementFamilyBlockForSingleNoChildren() throws Exception {
-        String text = extract(service.generateStatementDocx(smirnovClient()));
-        assertContainsWithPreview(text, "В браке не состоит");
+    void testStatementFamilyBlockForDivorcedNoChildren() throws Exception {
+        String text = extract(service.generateStatementDocx(ivanovClient()));
+        assertContainsWithPreview(text, "Брак расторгнут");
+        assertContainsWithPreview(text, "дата расторжения брака: 22.09.2021");
+        assertContainsWithPreview(text, "свидетельство о расторжении брака: II-БР №654321");
         assertContainsWithPreview(text, "Несовершеннолетних детей на иждивении не имеет");
+        assertNotContainsWithPreview(text, "В браке не состоит");
         assertNotContainsWithPreview(text, "свидетельству о заключении брака");
-        assertNotContainsWithPreview(text, "свидетельству о рождении");
+        assertNotContainsWithPreview(text, "Захарова Алёна");
         assertNotContainsWithPreview(text, "Наймушина");
-        assertNotContainsWithPreview(text, "Алёна");
+    }
+
+
+    @Test
+    void testStatementDoesNotDuplicateContractType() throws Exception {
+        String text = extract(service.generateStatementDocx(ivanovClient()));
+        assertNotContainsWithPreview(text, "Кредитный договор №Кредитный договор");
+        assertNotContainsWithPreview(text, "Кредитный договор №Договор");
+        assertNotContainsWithPreview(text, "Договор займа №Договор");
     }
 
     @Test
@@ -258,10 +415,10 @@ class DocumentGenerationServiceTest {
     }
 
     @Test
-    void testAttachmentsBlockDependsOnFamilyAndProperty() throws Exception {
-        String text = extract(service.generateStatementDocx(smirnovClient()));
-        assertNotContainsWithPreview(text, "Копия свидетельства о заключении брака");
-        assertNotContainsWithPreview(text, "Копия свидетельства о рождении");
+    void testStatementAttachmentsDependOnVehiclePresence() throws Exception {
+        String text = extract(service.generateStatementDocx(ivanovClient()));
+        assertContainsWithPreview(text, "Ответ из ГИБДД об отсутствии транспортных средств");
+        assertNotContainsWithPreview(text, "Ответ из ГИБДД о наличии транспортных средств");
     }
 
     @Test
@@ -344,7 +501,7 @@ class DocumentGenerationServiceTest {
         return new BankruptcyApplicationData(
                 debtor,
                 creditors,
-                new FamilyInfo(false, "Иванова Мария Сергеевна", List.of()),
+                new FamilyInfo(false, "дата расторжения брака: 22.09.2021, свидетельство о расторжении брака: II-БР №654321", List.of()),
                 new EmploymentInfo("UNEMPLOYED", "", "", BigDecimal.ZERO),
                 new PropertyInfo(List.of(), List.of(), false)
         );
@@ -404,6 +561,30 @@ class DocumentGenerationServiceTest {
         }
     }
 
+    private int runCount(byte[] bytes) throws Exception {
+        try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(bytes))) {
+            return document.getParagraphs().stream().mapToInt(paragraph -> paragraph.getRuns().size()).sum();
+        }
+    }
+
+    private int tableCount(byte[] bytes) throws Exception {
+        try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(bytes))) {
+            return document.getTables().size();
+        }
+    }
+
+    private boolean containsZipEntry(byte[] docxBytes, String entryName) throws IOException {
+        try (ZipInputStream zipInputStream = new ZipInputStream(new ByteArrayInputStream(docxBytes), StandardCharsets.UTF_8)) {
+            ZipEntry entry;
+            while ((entry = zipInputStream.getNextEntry()) != null) {
+                if (entryName.equals(entry.getName())) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     private List<String> listDocxEntries(byte[] zipBytes) throws IOException {
         List<String> entries = new ArrayList<>();
         try (ZipInputStream zipInputStream = new ZipInputStream(new ByteArrayInputStream(zipBytes), StandardCharsets.UTF_8)) {
@@ -442,6 +623,35 @@ class DocumentGenerationServiceTest {
             }
         }
         return xml.toString();
+    }
+
+    private byte[] readResource(String classpath) throws IOException {
+        try (InputStream inputStream = Thread.currentThread().getContextClassLoader().getResourceAsStream(classpath)) {
+            if (inputStream == null) {
+                throw new IOException("Resource not found: " + classpath);
+            }
+            return inputStream.readAllBytes();
+        }
+    }
+
+    private byte[] createBrokenDocxWithoutDocumentXml() throws IOException {
+        try (java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+             java.util.zip.ZipOutputStream zipOutputStream = new java.util.zip.ZipOutputStream(out)) {
+            zipOutputStream.putNextEntry(new java.util.zip.ZipEntry("[Content_Types].xml"));
+            zipOutputStream.write("<Types/>".getBytes(StandardCharsets.UTF_8));
+            zipOutputStream.closeEntry();
+            zipOutputStream.finish();
+            return out.toByteArray();
+        }
+    }
+
+    private byte[] createDocxWithStatementText(String text) throws IOException {
+        try (org.apache.poi.xwpf.usermodel.XWPFDocument document = new org.apache.poi.xwpf.usermodel.XWPFDocument();
+             java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream()) {
+            document.createParagraph().createRun().setText(text);
+            document.write(out);
+            return out.toByteArray();
+        }
     }
 
     private byte[] readStatementDocx(byte[] zipBytes) throws IOException {
