@@ -248,7 +248,12 @@ class DocumentGenerationServiceTest {
                 "113-764-260-43",
                 "пр. Победы",
                 "Курчатовский",
-                "Смолино"
+                "Смолино",
+                "454014",
+                "Челябинская обл.",
+                "330",
+                "кв.44",
+                "17 ноября 1984"
         );
         for (byte[] docx : readDocxEntries(zip)) {
             String text = extract(docx);
@@ -283,7 +288,12 @@ class DocumentGenerationServiceTest {
                 "113-764-260-43",
                 "пр. Победы",
                 "Курчатовский",
-                "Смолино"
+                "Смолино",
+                "454014",
+                "Челябинская обл.",
+                "330",
+                "кв.44",
+                "17 ноября 1984"
         );
         for (String marker : forbidden) {
             assertNotContainsWithPreview(text, marker);
@@ -442,25 +452,34 @@ class DocumentGenerationServiceTest {
 
     @Test
     void testStatementHeaderBlockReplacedCompletely() throws Exception {
-        String text = extract(service.generateStatementDocx(smirnovClient()));
-        assertContainsWithPreview(text, "Заявитель (должник): Смирнов Андрей Павлович");
-        assertContainsWithPreview(text, "Кредитор1: ПАО ВТБ");
-        assertContainsWithPreview(text, "Кредитор 2: ООО МФК Займер");
-        assertContainsWithPreview(text, "Кредитор 3: ООО МКК Деньги Сразу");
-        assertNotContainsWithPreview(text, "Захаров Владимир Игоревич");
-        assertNotContainsWithPreview(text, "ООО МФК \"ВЭББАНКИР\"");
-        assertNotContainsWithPreview(text, "ООО МКК ТУРБОЗАЙМ");
-        assertNotContainsWithPreview(text, "ООО \"МИГКРЕДИТ\"");
+        String text = extract(service.generateStatementDocx(ivanovClient()));
+        assertContainsWithPreview(text, "Заявитель (должник): Иванов Сергей Николаевич");
+        assertContainsWithPreview(text, "Кредитор1: АО Альфа-Банк");
+        assertContainsWithPreview(text, "Кредитор 2: ООО МКК Срочноденьги");
+        assertContainsWithPreview(text, "Кредитор 3: ООО ПКО Право Онлайн");
+        assertNotContainsWithPreview(text, "ВЭББАНКИР");
+        assertNotContainsWithPreview(text, "ТУРБОЗАЙМ");
+        assertNotContainsWithPreview(text, "МИГКРЕДИТ");
+        assertNotContainsWithPreview(text, "пр. Победы");
+        assertNotContainsWithPreview(text, "Курчатовский");
     }
 
     @Test
     void testDebtorIntroBlockReplacedCompletely() throws Exception {
-        String text = extract(service.generateStatementDocx(smirnovClient()));
-        assertContainsWithPreview(text, "Смирнов Андрей Павлович");
-        assertNotContainsWithPreview(text, "паспорт серия 75 10 742228");
-        assertNotContainsWithPreview(text, "454014, Челябинская обл., Курчатовский р-н г. Челябинск, пр. Победы, д. 330, кв.44");
+        String text = extract(service.generateStatementDocx(ivanovClient()));
+        assertContainsWithPreview(text, "Иванов Сергей Николаевич");
+        assertContainsWithPreview(text, "14.03.1989");
+        assertContainsWithPreview(text, "г. Москва");
+        assertContainsWithPreview(text, "4510 123456");
+        assertContainsWithPreview(text, "770123456789");
+        assertContainsWithPreview(text, "112-233-445 95");
+        assertNotContainsWithPreview(text, "17 ноября 1984");
+        assertNotContainsWithPreview(text, "Смолино");
+        assertNotContainsWithPreview(text, "75 10 742228");
         assertNotContainsWithPreview(text, "744713194008");
         assertNotContainsWithPreview(text, "113-764-260-43");
+        assertNotContainsWithPreview(text, "пр. Победы");
+        assertNotContainsWithPreview(text, "Курчатовский");
     }
 
     @Test

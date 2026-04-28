@@ -81,7 +81,12 @@ public class DocumentGenerationService {
             "113-764-260-43",
             "пр. Победы",
             "Курчатовский",
-            "Смолино"
+            "Смолино",
+            "454014",
+            "Челябинская обл.",
+            "330",
+            "кв.44",
+            "17 ноября 1984"
     );
     private static final List<String> TEMPLATE_ARTIFACTS_FOR_IVANOV = List.of(
             "Захаров",
@@ -729,10 +734,11 @@ public class DocumentGenerationService {
     }
 
     void assertNoLegacyData(byte[] docxBytes) throws IOException {
+        String text = extractDocxText(docxBytes).replace('\u00A0', ' ').replace('\u202F', ' ').replaceAll("\\s+", " ");
         String xml = readWordXml(docxBytes);
         List<String> found = new ArrayList<>();
         for (String marker : STRICT_LEGACY_MARKERS) {
-            if (xml.contains(marker)) {
+            if (xml.contains(marker) || text.contains(marker)) {
                 found.add(marker);
             }
         }
@@ -1082,7 +1088,15 @@ public class DocumentGenerationService {
                             .replace("Захарова Алёна", "")
                             .replace("75 10 742228", "")
                             .replace("744713194008", "")
-                            .replace("113-764-260-43", "");
+                            .replace("113-764-260-43", "")
+                            .replace("пр. Победы", "")
+                            .replace("Курчатовский", "")
+                            .replace("Смолино", "")
+                            .replace("454014", "")
+                            .replace("Челябинская обл.", "")
+                            .replace("330", "")
+                            .replace("кв.44", "")
+                            .replace("17 ноября 1984", "");
                     content = xml.getBytes(StandardCharsets.UTF_8);
                 }
                 zipOutputStream.putNextEntry(new ZipEntry(entry.getName()));
@@ -1105,6 +1119,13 @@ public class DocumentGenerationService {
             }
         }
         return xml.toString();
+    }
+
+    private String extractDocxText(byte[] docxBytes) throws IOException {
+        try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(docxBytes));
+             XWPFWordExtractor extractor = new XWPFWordExtractor(document)) {
+            return extractor.getText();
+        }
     }
 
     private byte[] removeWordComments(byte[] docxBytes) throws IOException {

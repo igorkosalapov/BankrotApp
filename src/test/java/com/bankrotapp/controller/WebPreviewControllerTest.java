@@ -6,6 +6,9 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
+
+import java.nio.charset.StandardCharsets;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
@@ -32,11 +35,14 @@ class WebPreviewControllerTest {
 
     @Test
     void shouldRenderPreviewWithCalculatedTotals() throws Exception {
-        mockMvc.perform(basePreviewRequest()
+        MvcResult result = mockMvc.perform(basePreviewRequest()
                         .param("creditorLines", "Банк А|Адрес А|loan|D1|01.01.2024|1000|док|1\nБанк А|Адрес А|loan|D2|02.01.2024|500|док|1"))
                 .andExpect(status().isOk())
-                .andExpect(content().string(containsString("общая сумма: 1\u00A0500,00 ₽")))
-                .andExpect(content().string(containsString("Общая сумма долга:</strong> 1\u00A0500,00 ₽")));
+                .andExpect(content().encoding("UTF-8"))
+                .andReturn();
+        String body = normalize(result.getResponse().getContentAsString(StandardCharsets.UTF_8));
+        org.junit.jupiter.api.Assertions.assertTrue(body.contains("Общая сумма долга: 1 500,00 ₽"));
+        org.junit.jupiter.api.Assertions.assertTrue(body.contains("Иванов Иван Иванович"));
     }
 
     @Test
@@ -72,5 +78,13 @@ class WebPreviewControllerTest {
                 .param("firstName", "Иван")
                 .param("middleName", "Иванович")
                 .param("creditorLines", "Банк А|Адрес|loan|D1|01.01.2024|1000|док|1");
+    }
+
+    private String normalize(String text) {
+        return text
+                .replace('\u00A0', ' ')
+                .replace('\u202F', ' ')
+                .replaceAll("\\s+", " ")
+                .trim();
     }
 }

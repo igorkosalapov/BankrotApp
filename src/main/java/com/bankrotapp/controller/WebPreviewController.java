@@ -46,7 +46,7 @@ public class WebPreviewController {
         this.previewInputParser = new PreviewInputParser();
     }
 
-    @GetMapping(value = "/", produces = MediaType.TEXT_HTML_VALUE)
+    @GetMapping(value = "/", produces = "text/html;charset=UTF-8")
     @ResponseBody
     public String formPage() {
         return """
@@ -160,7 +160,7 @@ public class WebPreviewController {
                 """;
     }
 
-    @PostMapping(value = "/preview", consumes = MediaType.APPLICATION_FORM_URLENCODED_VALUE, produces = MediaType.TEXT_HTML_VALUE)
+    @PostMapping(value = "/preview", consumes = MediaType.APPLICATION_FORM_URLENCODED_VALUE, produces = "text/html;charset=UTF-8")
     @ResponseBody
     public String previewPage(@ModelAttribute PreviewFormData form, HttpSession session) {
         List<Creditor> creditors = previewInputParser.parseCreditors(form.getCreditorLines());
